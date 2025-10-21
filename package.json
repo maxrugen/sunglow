@@ -1,0 +1,20 @@
+{
+  "name": "sunglow",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "suncalc": "^1.9.0"
+  },
+  "devDependencies": {
+    "@sveltejs/adapter-auto": "^3.3.1",
+    "@sveltejs/kit": "^2.47.2",
+    "svelte": "^5.0.0",
+    "vite": "^6.3.0"
+  }
+}
