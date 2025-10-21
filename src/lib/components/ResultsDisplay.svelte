@@ -1,18 +1,19 @@
-<script>
-    export let prediction;
-    export let locationLabel = '';
-    export let confidence = undefined;
+<script lang="ts">
+    import type { ClientPrediction } from '$lib/types';
+    export let prediction: ClientPrediction | null;
+    export let locationLabel: string = '';
+    export let confidence: number | undefined = undefined;
 
     $: score = Number(prediction?.qualityScore ?? 0);
     $: description = score >= 80 ? 'Great' : score >= 65 ? 'Good' : score >= 40 ? 'Fair' : 'Poor';
 
-    function formatTime(value) {
+    function formatTime(value: Date | number | null | undefined) {
         if (!value) return '--';
         const d = value instanceof Date ? value : new Date(value);
         return new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(d);
     }
 
-    function buildExplanation(p) {
+    function buildExplanation(p: any) {
         const fx = p?.explanation?.factors;
         if (!fx) return '';
 
@@ -107,7 +108,11 @@
             {#if prediction?.used}
                 <p class="used">
                     Used time: {new Date((prediction.used.epochSecLocal || 0) * 1000).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' })}
-                    · Solar altitude: {prediction?.explanation?.factors?.solarAltitude?.deg !== undefined ? `${Math.round(prediction.explanation.factors.solarAltitude.deg)}°` : '—'}
+                    {#if (() => { const fx:any = prediction?.explanation?.factors as any; return typeof fx?.solarAltitude?.deg === 'number'; })()}
+                        · Solar altitude: {(() => { const fx:any = prediction?.explanation?.factors as any; return Math.round(fx.solarAltitude.deg); })()}°
+                    {:else}
+                        · Solar altitude: —
+                    {/if}
                     · Coords: {prediction.used.latitude?.toFixed?.(3)}, {prediction.used.longitude?.toFixed?.(3)}
                 </p>
             {/if}

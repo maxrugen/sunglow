@@ -1,16 +1,18 @@
-<script>
+<script lang="ts">
     import { createEventDispatcher } from 'svelte';
 
-    const dispatch = createEventDispatcher();
+    type LocationSuccessDetail = { latitude: number; longitude: number; label?: string };
+    type LocationErrorDetail = { message: string };
+    const dispatch = createEventDispatcher<{ locationSuccess: LocationSuccessDetail; locationError: LocationErrorDetail }>();
 
-    let city = '';
-    let results = [];
-    let isSearching = false;
-    let isLocating = false;
-    let errorMessage = '';
-    let activeIndex = -1;
-    let debounceHandle;
-    let rootEl;
+    let city: string = '';
+    let results: any[] = [];
+    let isSearching: boolean = false;
+    let isLocating: boolean = false;
+    let errorMessage: string = '';
+    let activeIndex: number = -1;
+    let debounceHandle: any;
+    let rootEl: HTMLDivElement;
 
     async function searchCity() {
         errorMessage = '';
@@ -27,14 +29,14 @@
                 errorMessage = 'No results found.';
             }
         } catch (e) {
-            errorMessage = e?.message || 'Failed to search city';
+            errorMessage = e instanceof Error ? e.message : 'Failed to search city';
         } finally {
             isSearching = false;
         }
     }
 
-    function onInput(e) {
-        city = e.currentTarget.value;
+    function onInput(e: Event) {
+        city = (e.currentTarget as HTMLInputElement).value;
         activeIndex = -1;
         clearTimeout(debounceHandle);
         debounceHandle = setTimeout(() => {
@@ -42,7 +44,7 @@
         }, 300);
     }
 
-    function onKeyDown(e) {
+    function onKeyDown(e: KeyboardEvent) {
         if (!results || results.length === 0) return;
         if (e.key === 'ArrowDown') {
             e.preventDefault();
@@ -65,9 +67,10 @@
         activeIndex = -1;
     }
 
-    function onWindowClick(e) {
+    function onWindowClick(e: MouseEvent) {
         if (!rootEl) return;
-        if (!rootEl.contains(e.target)) {
+        const t = e.target as Node | null;
+        if (t && !rootEl.contains(t)) {
             closeResults();
         }
     }

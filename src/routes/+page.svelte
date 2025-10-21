@@ -1,16 +1,17 @@
-<script>
+<script lang="ts">
     import LocationInput from '$lib/components/LocationInput.svelte';
     import ResultsDisplay from '$lib/components/ResultsDisplay.svelte';
-    let SunCalcPromise = null;
+    import type { ClientPrediction } from '$lib/types';
+    let SunCalcPromise: Promise<any> | null = null;
 
-    export let data;
-    let predictionData = null;
-    let isLoading = false;
-    let errorMessage = '';
-    let location = null;
-    let locationLabel = '';
+    export let data: any;
+    let predictionData: ClientPrediction | null = null;
+    let isLoading: boolean = false;
+    let errorMessage: string = '';
+    let location: { latitude: number; longitude: number } | null = null;
+    let locationLabel: string = '';
 
-    async function fetchPrediction(latitude, longitude) {
+    async function fetchPrediction(latitude: number, longitude: number) {
         isLoading = true;
         errorMessage = '';
         predictionData = null;
@@ -40,19 +41,20 @@
                 timings: {
                     sunset: times.sunset,
                     goldenHour: times.goldenHour
-                }
+                },
+                used: data?.used
             };
 
             updateTheme(predictionData.qualityScore);
             try { localStorage.setItem('sunglow:last', JSON.stringify({ latitude, longitude, label: locationLabel })); } catch {}
         } catch (err) {
-            errorMessage = err?.message || 'An unexpected error occurred.';
+            errorMessage = err instanceof Error ? err.message : 'An unexpected error occurred.';
         } finally {
             isLoading = false;
         }
     }
 
-    async function onLocationSuccess(event) {
+    async function onLocationSuccess(event: CustomEvent<{ latitude: number; longitude: number; label?: string }>) {
         const { latitude, longitude, label } = event.detail;
         location = { latitude, longitude };
         if (label) {
@@ -73,11 +75,11 @@
         fetchPrediction(latitude, longitude);
     }
 
-    function onLocationError(event) {
-        errorMessage = event?.detail?.message || 'Failed to get location.';
+    function onLocationError(event: CustomEvent<{ message: string }>) {
+        errorMessage = event.detail?.message || 'Failed to get location.';
     }
 
-    function updateTheme(score) {
+    function updateTheme(score: number) {
         const root = document.documentElement;
         const s = Number(score || 0);
 
@@ -117,10 +119,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="description" content="Predict sunset quality with real-time weather and solar timings." />
     <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link rel="preconnect" href="https://api.open-meteo.com" crossorigin>
-    <link rel="preconnect" href="https://geocoding-api.open-meteo.com" crossorigin>
-    <link rel="preconnect" href="https://api.bigdatacloud.net" crossorigin>
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous">
+    <link rel="preconnect" href="https://api.open-meteo.com" crossorigin="anonymous">
+    <link rel="preconnect" href="https://geocoding-api.open-meteo.com" crossorigin="anonymous">
+    <link rel="preconnect" href="https://api.bigdatacloud.net" crossorigin="anonymous">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
     <meta name="theme-color" content="#000000" />
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='40' fill='%23ffcc80'/></svg>">
@@ -138,7 +140,7 @@
     {#if isLoading}
         <div class="loader" aria-live="polite">Loading prediction…</div>
     {:else if predictionData}
-        <ResultsDisplay prediction={predictionData} locationLabel={locationLabel} confidence={predictionData?.confidence} />
+        <ResultsDisplay prediction={predictionData} locationLabel={locationLabel} confidence={predictionData?.confidence as number | undefined} />
     {:else}
         <LocationInput on:locationSuccess={onLocationSuccess} on:locationError={onLocationError} />
     {/if}
