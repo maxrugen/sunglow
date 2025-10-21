@@ -13,6 +13,8 @@
     let activeIndex: number = -1;
     let debounceHandle: any;
     let rootEl: HTMLDivElement;
+    let inputEl: HTMLInputElement;
+    let activeAnnouncement: string = '';
 
     async function searchCity() {
         errorMessage = '';
@@ -25,6 +27,8 @@
             if (!res.ok) throw new Error('Failed to search city');
             const data = await res.json();
             results = data?.results || [];
+            // ensure an initial active option for keyboard users
+            if (results.length > 0 && activeIndex === -1) activeIndex = 0;
             if (results.length === 0) {
                 errorMessage = 'No results found.';
             }
@@ -65,6 +69,8 @@
     function closeResults() {
         results = [];
         activeIndex = -1;
+        // keep focus on the input for continuity
+        inputEl?.focus();
     }
 
     function onWindowClick(e: MouseEvent) {
@@ -111,6 +117,7 @@
             aria-controls="search-results"
             on:input={onInput}
             on:keydown={onKeyDown}
+            bind:this={inputEl}
         />
         <button class="btn" type="submit" disabled={isLocating || isSearching}>
             {#if isSearching}
@@ -134,6 +141,7 @@
 
     {#if results.length > 0}
         <p class="visually-hidden" aria-live="polite">{results.length} result{results.length === 1 ? '' : 's'} found</p>
+        <p class="visually-hidden" aria-live="polite">{activeAnnouncement}</p>
         <ul class="results" role="listbox" id="search-results">
             {#each results as r}
                 <li>
@@ -186,6 +194,7 @@
     .result { width: 100%; display: flex; align-items: center; justify-content: space-between; padding: 0.6rem 0.75rem; border-radius: 10px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.14); cursor: pointer; color: var(--text-primary); }
     .result:hover { background: rgba(255,255,255,0.14); }
     .result.active { border-color: var(--text-accent); background: rgba(255,255,255,0.14); }
+    .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 
     @media (max-width: 520px) {
         .controls { flex-direction: column; }

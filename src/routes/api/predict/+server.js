@@ -22,20 +22,33 @@ function getCacheKeyWithHour(lat, lon, epochSecLocal) {
     return `${dayKey},h:${hourKey}`;
 }
 
-async function fetchWithRetry(url, options = {}, retries = 1, timeoutMs = 8000) {
-    const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-        const res = await fetch(url, { ...options, signal: controller.signal });
-        clearTimeout(id);
-        if (!res.ok && retries > 0) {
-            return await fetchWithRetry(url, options, retries - 1, timeoutMs);
+async function fetchWithRetry(url, options = {}, retries = 3, timeoutMs = 6000, backoffBaseMs = 300) {
+    let attempt = 0;
+    while (true) {
+        const controller = new AbortController();
+        const id = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+            const res = await fetch(url, { ...options, signal: controller.signal });
+            clearTimeout(id);
+            if (!res.ok && attempt < retries) {
+                attempt++;
+                const jitter = Math.random() * 100;
+                const delay = Math.min(2000, backoffBaseMs * Math.pow(2, attempt)) + jitter;
+                await new Promise((r) => setTimeout(r, delay));
+                continue;
+            }
+            return res;
+        } catch (e) {
+            clearTimeout(id);
+            if (attempt < retries) {
+                attempt++;
+                const jitter = Math.random() * 100;
+                const delay = Math.min(2000, backoffBaseMs * Math.pow(2, attempt)) + jitter;
+                await new Promise((r) => setTimeout(r, delay));
+                continue;
+            }
+            throw e;
         }
-        return res;
-    } catch (e) {
-        clearTimeout(id);
-        if (retries > 0) return await fetchWithRetry(url, options, retries - 1, timeoutMs);
-        throw e;
     }
 }
 
