@@ -1,5 +1,6 @@
-/** @type {import('./$types').PageServerLoad} */
-export async function load({ fetch, url }) {
+import type { PageServerLoad } from './$types';
+
+export const load: PageServerLoad = async ({ fetch, url }) => {
   const lat = url.searchParams.get('lat');
   const lon = url.searchParams.get('lon');
   const label = url.searchParams.get('label') || '';
@@ -27,6 +28,6 @@ export async function load({ fetch, url }) {
   }
 
   return {};
-}
+};
 
 

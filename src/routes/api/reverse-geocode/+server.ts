@@ -1,7 +1,6 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestHandler } from '@sveltejs/kit';
 
-// Reverse geocoding via Open-Meteo Geocoding API (nearest place)
-export async function GET({ url }) {
+export const GET: RequestHandler = async ({ url, fetch }) => {
     const lat = url.searchParams.get('latitude');
     const lon = url.searchParams.get('longitude');
     const latitude = Number(lat);
@@ -10,11 +9,9 @@ export async function GET({ url }) {
         return json({ error: 'Invalid coordinates' }, { status: 400 });
     }
 
-    // Try Open-Meteo reverse geocoding first
     try {
         const params = new URLSearchParams({ latitude: String(latitude), longitude: String(longitude), count: '1', format: 'json' });
         const apiUrl = `https://geocoding-api.open-meteo.com/v1/reverse?${params.toString()}`;
-
         const res = await fetch(apiUrl);
         if (res.ok) {
             const data = await res.json();
@@ -24,11 +21,8 @@ export async function GET({ url }) {
                 return json({ label, result: r });
             }
         }
-    } catch (e) {
-        // ignore and try fallback
-    }
+    } catch {}
 
-    // Fallback to BigDataCloud (no API key required)
     try {
         const fallbackUrl = `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${encodeURIComponent(latitude)}&longitude=${encodeURIComponent(longitude)}&localityLanguage=en`;
         const res2 = await fetch(fallbackUrl);
@@ -40,11 +34,9 @@ export async function GET({ url }) {
             const label = [name, admin1 && admin1 !== name ? admin1 : '', country].filter(Boolean).join(', ');
             return json({ label });
         }
-    } catch (e) {
-        // ignore
-    }
+    } catch {}
 
     return json({ label: '' });
-}
+};
 
 

@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite dev",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "typecheck": "svelte-check --tsconfig ./tsconfig.json",
+    "check": "npm run typecheck"
   },
   "dependencies": {
     "suncalc": "^1.9.0"
@@ -14,7 +16,10 @@
   "devDependencies": {
     "@sveltejs/adapter-auto": "^3.3.1",
     "@sveltejs/kit": "^2.47.2",
+    "@types/node": "^24.9.1",
     "svelte": "^5.0.0",
+    "svelte-check": "^4.3.3",
+    "typescript": "^5.9.3",
     "vite": "^6.3.0"
   }
 }

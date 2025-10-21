@@ -1,8 +1,7 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestHandler } from '@sveltejs/kit';
 
-// Simple proxy to Open-Meteo Geocoding API
-export async function GET({ url }) {
-    const q = url.searchParams.get('q')?.trim();
+export const GET: RequestHandler = async ({ url, fetch }) => {
+    const q = url.searchParams.get('q')?.trim() || '';
     if (!q) return json({ results: [] });
 
     const params = new URLSearchParams({ name: q, count: '5', format: 'json' });
@@ -12,7 +11,7 @@ export async function GET({ url }) {
     if (!res.ok) return json({ results: [] }, { status: 200 });
 
     const data = await res.json();
-    const results = (data?.results || []).map((r) => ({
+    const results = (data?.results || []).map((r: any) => ({
         id: r?.id,
         name: r?.name,
         country: r?.country,
@@ -22,6 +21,6 @@ export async function GET({ url }) {
     }));
 
     return json({ results });
-}
+};
 
 
