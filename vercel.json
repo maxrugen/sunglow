@@ -1,0 +1,12 @@
+{
+    "buildCommand": "npm run build",
+    "devCommand": "npm run dev",
+    "installCommand": "npm install",
+    "framework": "sveltekit",
+    "outputDirectory": ".svelte-kit",
+    "build": {
+        "env": {
+            "NODE_VERSION": "20"
+        }
+    }
+}
