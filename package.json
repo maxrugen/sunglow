@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@sveltejs/adapter-vercel": "^6.2.0",
+    "@vercel/analytics": "^1.6.1",
     "suncalc": "^1.9.0"
   },
   "engines": {
