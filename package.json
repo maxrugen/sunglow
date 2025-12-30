@@ -11,7 +11,11 @@
     "check": "npm run typecheck"
   },
   "dependencies": {
+    "@sveltejs/adapter-vercel": "^6.2.0",
     "suncalc": "^1.9.0"
+  },
+  "engines": {
+    "node": "20.x"
   },
   "overrides": {
     "cookie": "^0.7.0"
