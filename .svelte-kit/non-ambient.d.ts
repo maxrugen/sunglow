@@ -40,6 +40,6 @@ declare module "$app/types" {
 		};
 		Pathname(): "/" | "/api" | "/api/" | "/api/geocode" | "/api/geocode/" | "/api/predict" | "/api/predict/" | "/api/reverse-geocode" | "/api/reverse-geocode/";
 		ResolvedPathname(): `${"" | `/${string}`}${ReturnType<AppTypes['Pathname']>}`;
-		Asset(): string & {};
+		Asset(): "/manifest.webmanifest" | "/service-worker.js" | string & {};
 	}
 }
