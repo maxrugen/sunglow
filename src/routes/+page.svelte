@@ -1,15 +1,25 @@
 <script lang="ts">
     import LocationInput from '$lib/components/LocationInput.svelte';
     import ResultsDisplay from '$lib/components/ResultsDisplay.svelte';
-    import type { ClientPrediction } from '$lib/types';
+    import FlightInput from '$lib/components/FlightInput.svelte';
+    import FlightResultsDisplay from '$lib/components/FlightResultsDisplay.svelte';
+    import type { ClientPrediction, FlightPredictionResponse } from '$lib/types';
     let SunCalcPromise: Promise<any> | null = null;
 
     export let data: any;
+
+    let mode: 'location' | 'flight' = 'location';
+
+    // Location mode state
     let predictionData: ClientPrediction | null = null;
     let isLoading: boolean = false;
     let errorMessage: string = '';
     let location: { latitude: number; longitude: number } | null = null;
     let locationLabel: string = '';
+
+    // Flight mode state
+    let flightPrediction: FlightPredictionResponse | null = null;
+    let isFlightLoading: boolean = false;
 
     async function fetchPrediction(latitude: number, longitude: number) {
         isLoading = true;
@@ -112,6 +122,46 @@
         root.style.setProperty('--text-accent', '#ffffff');
     }
     // Note: we no longer auto-load the last location on mount so that a reload returns to the search view.
+
+    function switchMode(target: 'location' | 'flight') {
+        mode = target;
+        errorMessage = '';
+        predictionData = null;
+        flightPrediction = null;
+    }
+
+    async function onFlightSubmit(event: CustomEvent<{ depIata: string; arrIata: string; depTime: string; arrTime: string }>) {
+        isFlightLoading = true;
+        errorMessage = '';
+        flightPrediction = null;
+
+        try {
+            const res = await fetch('/api/predict-flight', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(event.detail)
+            });
+
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(errText || 'Flight prediction request failed');
+            }
+
+            flightPrediction = await res.json();
+            if (flightPrediction?.qualityScore != null) {
+                updateTheme(flightPrediction.qualityScore);
+            }
+        } catch (err) {
+            errorMessage = err instanceof Error ? err.message : 'An unexpected error occurred.';
+        } finally {
+            isFlightLoading = false;
+        }
+    }
+
+    function onFlightBack() {
+        flightPrediction = null;
+    }
+
 </script>
 
 <svelte:head>
@@ -134,15 +184,30 @@
 <main class="shell">
     <header class="header">
         <h1>Sunglow</h1>
-        <p class="tagline">Predict tonight's sunset quality</p>
+        <p class="tagline">{mode === 'location' ? "Predict tonight's sunset quality" : 'Will you see a sunset on your flight?'}</p>
     </header>
 
-    {#if isLoading}
-        <div class="loader" aria-live="polite">Loading prediction…</div>
-    {:else if predictionData}
-        <ResultsDisplay prediction={predictionData} locationLabel={locationLabel} confidence={predictionData?.confidence as number | undefined} />
+    <nav class="mode-toggle" aria-label="Prediction mode">
+        <button class="toggle-btn" class:active={mode === 'location'} on:click={() => switchMode('location')}>Location</button>
+        <button class="toggle-btn" class:active={mode === 'flight'} on:click={() => switchMode('flight')}>Flight</button>
+    </nav>
+
+    {#if mode === 'location'}
+        {#if isLoading}
+            <div class="loader" aria-live="polite">Loading prediction…</div>
+        {:else if predictionData}
+            <ResultsDisplay prediction={predictionData} locationLabel={locationLabel} confidence={predictionData?.confidence as number | undefined} />
+        {:else}
+            <LocationInput on:locationSuccess={onLocationSuccess} on:locationError={onLocationError} />
+        {/if}
     {:else}
-        <LocationInput on:locationSuccess={onLocationSuccess} on:locationError={onLocationError} />
+        {#if isFlightLoading}
+            <div class="loader" aria-live="polite">Analyzing flight route…</div>
+        {:else if flightPrediction}
+            <FlightResultsDisplay prediction={flightPrediction} on:back={onFlightBack} />
+        {:else}
+            <FlightInput on:flightSubmit={onFlightSubmit} on:flightError={onLocationError} on:switchMode={() => switchMode('location')} />
+        {/if}
     {/if}
 
     {#if errorMessage}
@@ -164,6 +229,29 @@
     .header { text-align: center; }
     h1 { margin: 0; font-size: 2rem; }
     .tagline { margin: 0.25rem 0 0; opacity: 0.9; }
+    .mode-toggle {
+        display: flex;
+        gap: 0;
+        border-radius: 10px;
+        overflow: hidden;
+        border: 1px solid rgba(255,255,255,0.18);
+    }
+    .toggle-btn {
+        padding: 0.5rem 1.25rem;
+        background: transparent;
+        border: none;
+        color: var(--text-primary);
+        cursor: pointer;
+        font-size: 0.95rem;
+        opacity: 0.6;
+        transition: opacity 0.2s, background 0.2s;
+    }
+    .toggle-btn.active {
+        opacity: 1;
+        background: rgba(255,255,255,0.12);
+        font-weight: 600;
+    }
+    .toggle-btn:hover { opacity: 0.9; }
     .loader { opacity: 0.9; }
     .error { color: #ffd3d3; }
 </style>

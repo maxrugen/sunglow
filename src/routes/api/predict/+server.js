@@ -332,10 +332,12 @@ export async function POST({ request }) {
 
         const aod = Number(daily?.aerosol_optical_depth?.[0] ?? 0);
 
-        // Weighted weather composites
+        // Weighted weather composites — weights stay paired with their index
         const composite = ((inds) => {
-            const baseWeights = [0.3, 0.6, 0.1];
-            const weights = baseWeights.slice(0, inds.length);
+            const pairWeights = [0.3, 0.6, 0.1]; // for [idx-1, idx, idx+1]
+            // inds is built as [idx-1, idx, idx+1].filter(valid), so map weights by position
+            const allPairs = [[idx - 1, 0.3], [idx, 0.6], [idx + 1, 0.1]];
+            const weights = inds.map(i => { const p = allPairs.find(([ai]) => ai === i); return p ? p[1] : 0; });
             const weightSum = weights.reduce((a, b) => a + b, 0) || 1;
             return inds.reduce((acc, i, k) => {
                 const w = weights[k] / weightSum;

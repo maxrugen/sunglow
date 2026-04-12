@@ -228,4 +228,169 @@ export function evaluate(weatherData: WeatherData, alignedToSunset: boolean): {
   return { score, details, confidence };
 }
 
+/**
+ * In-flight sunset scoring: adapts the ground-level model for cruise altitude (~10km).
+ *
+ * Key differences from ground-level evaluate():
+ * - Low clouds are *below* the plane → penalty is inverted to a mild bonus (cloud-top sunsets)
+ * - PM2.5 is irrelevant at altitude → ignored
+ * - Visibility penalty is reduced (cleaner air at altitude)
+ * - Confidence is lower because forecasts are surface-level
+ */
+export function evaluateInFlight(weatherData: WeatherData, alignedToSunset: boolean): {
+  score: number;
+  details: Record<string, unknown>;
+  confidence: number;
+} {
+  const {
+    highCloud,
+    midCloud,
+    lowCloud,
+    humidity,
+    aod,
+    solarAltitudeDeg,
+    totalCloud,
+    precipitationProbability,
+    precipitationMmPerHour,
+    pressureTrendHpa,
+    windSpeed10mMs,
+    visibilityM,
+    dewPointSpreadC,
+  } = weatherData;
+
+  let score = 100.0;
+
+  // High cloud bonus (same as ground — high clouds are at or above cruise)
+  const highCloudBonus = 30 * (1 - Math.abs(highCloud - 60) / 60);
+  const netHigh = highCloudBonus - 15;
+  score += netHigh;
+
+  // Mid cloud bonus (same as ground — mid clouds are near cruise altitude)
+  const midCloudBonus = 20 * (1 - Math.abs(midCloud - 40) / 40);
+  const netMid = midCloudBonus - 10;
+  score += netMid;
+
+  // Low cloud: INVERTED for in-flight. Low clouds below create a beautiful cloud-top canvas.
+  // Moderate low cloud is a bonus, very heavy overcast is neutral (no penalty, slight bonus).
+  let lowCloudAdj = 0;
+  if (lowCloud > 20 && lowCloud <= 70) {
+    lowCloudAdj = +5; // cloud-top sunset views
+  } else if (lowCloud > 70) {
+    lowCloudAdj = +3; // solid cloud carpet, still scenic from above
+  }
+  score += lowCloudAdj;
+
+  // Humidity damper (reduced effect at altitude)
+  let humidityPenalty = 0;
+  if (humidity > 80) {
+    humidityPenalty = (humidity - 80) * 0.3;
+    score -= humidityPenalty;
+  }
+
+  // AOD bonus (same logic)
+  const aerosolAllowed = (humidity <= 85) && (visibilityM === undefined || visibilityM >= 8000);
+  let aodBonus = 0;
+  if (aod > 0.15 && aod < 0.4 && aerosolAllowed) {
+    aodBonus = 10;
+    score += aodBonus;
+  }
+
+  // Precipitation penalty (reduced — rain below doesn't block view as much from above)
+  let precipProbPenalty = 0;
+  if (typeof precipitationProbability === 'number') {
+    precipProbPenalty = Math.max(0, precipitationProbability - 50) * 0.15;
+    score -= precipProbPenalty;
+  }
+
+  let precipRatePenalty = 0;
+  if (typeof precipitationMmPerHour === 'number' && precipitationMmPerHour > 0.5) {
+    precipRatePenalty = 6 * Math.min(precipitationMmPerHour / 3, 1);
+    score -= precipRatePenalty;
+  }
+
+  // Visibility penalty halved (at cruise, the atmosphere is cleaner)
+  let visibilityPenalty = 0;
+  if (typeof visibilityM === 'number' && visibilityM > 0 && visibilityM < 3000) {
+    visibilityPenalty = Math.min(8, ((3000 - visibilityM) / 3000) * 8);
+    score -= visibilityPenalty;
+  }
+
+  // Dew point spread (reduced weight)
+  let dewSpreadAdj = 0;
+  if (typeof dewPointSpreadC === 'number') {
+    if (dewPointSpreadC < 2) dewSpreadAdj = -4;
+    else if (dewPointSpreadC > 8) dewSpreadAdj = +1;
+    score += dewSpreadAdj;
+  }
+
+  // Wind (less relevant at cruise — skip surface wind effect)
+  let windAdj = 0;
+  if (typeof windSpeed10mMs === 'number') {
+    if (windSpeed10mMs <= 6) windAdj = +1;
+    score += windAdj;
+  }
+
+  // Pressure trend (same)
+  let pressureAdj = 0;
+  if (typeof pressureTrendHpa === 'number') {
+    if (pressureTrendHpa > 1) pressureAdj = +3;
+    else if (pressureTrendHpa < -1) pressureAdj = -3;
+    score += pressureAdj;
+  }
+
+  // PM2.5: irrelevant at cruise altitude — skipped
+
+  // Solar altitude band (same — this is geometry, not weather)
+  let solarAdj = 0;
+  if (typeof solarAltitudeDeg === 'number') {
+    const center = -3;
+    const halfWidth = 5;
+    const dist = Math.abs(solarAltitudeDeg - center);
+    if (dist <= halfWidth) {
+      solarAdj = Math.round(6 * (1 - dist / halfWidth));
+      score += solarAdj;
+    }
+  }
+
+  // Total cloud penalty (reduced — from above, total overcast isn't as impactful)
+  let totalCloudAdj = 0;
+  if (typeof totalCloud === 'number' && totalCloud > 95) {
+    totalCloudAdj = -3;
+    score += totalCloudAdj;
+  }
+
+  const clamped = Math.max(0, Math.min(100, Math.round(score)));
+
+  // Confidence: lower than ground because weather data is surface-level
+  let confidence = 80; // baseline lower than ground's 90
+  const pop = precipitationProbability ?? 0;
+  const precip = precipitationMmPerHour ?? 0;
+  if (pop > 50 || precip > 0.5) confidence -= 15;
+  if (highCloud > 80) confidence -= 15; // high cloud at cruise is the main concern
+  if (!alignedToSunset) confidence -= 10;
+  // Extra penalty: surface weather may not reflect conditions at 10km
+  confidence -= 5;
+  confidence = Math.max(0, Math.min(100, Math.round(confidence)));
+
+  return {
+    score: clamped,
+    details: {
+      highCloud: { value: highCloud, net: Math.round(netHigh) },
+      midCloud: { value: midCloud, net: Math.round(netMid) },
+      lowCloud: { value: lowCloud, adjustment: lowCloudAdj, note: 'inverted for altitude' },
+      humidity: { value: humidity, penalty: Math.round(-humidityPenalty) },
+      aod: { value: aod, bonus: aodBonus },
+      precipitation: { probability: precipitationProbability, rateMmH: precipitationMmPerHour, penaltyProb: Math.round(-precipProbPenalty), penaltyRate: Math.round(-precipRatePenalty) },
+      visibility: { meters: visibilityM, penalty: Math.round(-visibilityPenalty) },
+      dewSpread: { celsius: dewPointSpreadC, net: dewSpreadAdj },
+      wind: { speedMs: windSpeed10mMs, net: windAdj },
+      pressureTrend: { hPa: pressureTrendHpa, net: pressureAdj },
+      totalCloud: { value: totalCloud, net: totalCloudAdj },
+      solarAltitude: { deg: solarAltitudeDeg, net: solarAdj },
+      pm25: { ugm3: undefined, net: 0, note: 'irrelevant at cruise altitude' }
+    },
+    confidence
+  };
+}
+
 

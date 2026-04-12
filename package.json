@@ -8,7 +8,9 @@
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "svelte-check --tsconfig ./tsconfig.json",
-    "check": "npm run typecheck"
+    "check": "npm run typecheck",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@sveltejs/adapter-vercel": "^6.3.2",
@@ -29,6 +31,7 @@
     "svelte": "^5.54.1",
     "svelte-check": "^4.3.3",
     "typescript": "^5.9.3",
-    "vite": "^6.4.2"
+    "vite": "^6.4.2",
+    "vitest": "^4.1.4"
   }
 }
