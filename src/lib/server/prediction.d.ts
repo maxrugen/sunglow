@@ -8,7 +8,12 @@ export interface PredictionPayload {
   };
   confidence: number;
   explanation: { factors: unknown };
-  used: { epochSecLocal: number; latitude: number; longitude: number };
+  used: {
+    epochSecLocal: number;
+    latitude: number;
+    longitude: number;
+    utcOffsetSeconds: number;
+  };
 }
 
 export class PredictionError extends Error {

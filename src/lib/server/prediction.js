@@ -287,7 +287,7 @@ export async function predictSunset({ latitude, longitude }) {
         weatherData,
         confidence,
         explanation: { factors: details },
-        used: { epochSecLocal: selectedEpochSec, latitude, longitude }
+        used: { epochSecLocal: selectedEpochSec, latitude, longitude, utcOffsetSeconds }
     };
 
     try { responseCache.set(hourKey, { ts: Date.now(), payload }); } catch {}

@@ -27,6 +27,19 @@ function utcDateKey(d: Date): string {
   return d.toISOString().slice(0, 10); // YYYY-MM-DD
 }
 
+/**
+ * Format a UTC instant as HH:MM in the *location's* local wall-clock time by
+ * shifting by the location's UTC offset, then reading UTC fields. Returns null
+ * for invalid dates (e.g. no golden hour in polar summer/winter).
+ */
+function localHM(dateUtc: Date, utcOffsetSeconds: number): string | null {
+  if (!(dateUtc instanceof Date) || isNaN(dateUtc.getTime())) return null;
+  const shifted = new Date(dateUtc.getTime() + utcOffsetSeconds * 1000);
+  const hh = String(shifted.getUTCHours()).padStart(2, '0');
+  const mm = String(shifted.getUTCMinutes()).padStart(2, '0');
+  return `${hh}:${mm}`;
+}
+
 async function handle(request: Request, url: URL) {
   if (!cronAuthorized(request, url)) {
     return json({ error: 'unauthorized' }, { status: 401 });
@@ -51,7 +64,8 @@ async function handle(request: Request, url: URL) {
 
   for (const sub of subs) {
     checked++;
-    const sunset = SunCalc.getTimes(new Date(), sub.latitude, sub.longitude).sunset;
+    const times = SunCalc.getTimes(new Date(), sub.latitude, sub.longitude);
+    const sunset = times.sunset;
     if (!(sunset instanceof Date) || isNaN(sunset.getTime())) {
       skipped++;
       continue;
@@ -91,9 +105,16 @@ async function handle(request: Request, url: URL) {
       `${appUrl}/?lat=${sub.latitude}&lon=${sub.longitude}` +
       `&label=${encodeURIComponent(label)}`;
 
+    const goldenHourTime = localHM(times.goldenHour, payload.used.utcOffsetSeconds);
+    const sunsetTime = localHM(sunset, payload.used.utcOffsetSeconds);
+    const body =
+      goldenHourTime && sunsetTime
+        ? `${label}: ${payload.qualityScore}/100 predicted — golden hour at ${goldenHourTime}, sunset at ${sunsetTime}.`
+        : `${label}: ${payload.qualityScore}/100 predicted — golden hour is coming up.`;
+
     const result = await sendPush(sub, {
       title: 'Great sunset tonight 🌅',
-      body: `${label}: ${payload.qualityScore}/100 predicted — golden hour is coming up.`,
+      body,
       url: deepLink,
       tag: 'sunglow-sunset',
     });
