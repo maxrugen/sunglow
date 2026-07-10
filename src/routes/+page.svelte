@@ -1,6 +1,7 @@
 <script lang="ts">
     import LocationInput from '$lib/components/LocationInput.svelte';
     import ResultsDisplay from '$lib/components/ResultsDisplay.svelte';
+    import PushSubscribeButton from '$lib/components/PushSubscribeButton.svelte';
     import FlightInput from '$lib/components/FlightInput.svelte';
     import FlightResultsDisplay from '$lib/components/FlightResultsDisplay.svelte';
     import type { ClientPrediction, FlightPredictionResponse } from '$lib/types';
@@ -197,6 +198,9 @@
             <div class="loader" aria-live="polite">Loading prediction…</div>
         {:else if predictionData}
             <ResultsDisplay prediction={predictionData} locationLabel={locationLabel} confidence={predictionData?.confidence as number | undefined} />
+            {#if location}
+                <PushSubscribeButton location={{ latitude: location.latitude, longitude: location.longitude, label: locationLabel }} />
+            {/if}
         {:else}
             <LocationInput on:locationSuccess={onLocationSuccess} on:locationError={onLocationError} />
         {/if}

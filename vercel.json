@@ -8,5 +8,11 @@
         "env": {
             "NODE_VERSION": "20"
         }
-    }
+    },
+    "crons": [
+        {
+            "path": "/api/cron",
+            "schedule": "0 12 * * *"
+        }
+    ]
 }

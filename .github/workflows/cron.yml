@@ -1,0 +1,30 @@
+name: Sunset alert cron
+
+# Vercel Hobby fires project crons only once per day, but sunsets happen at each
+# subscriber's local time. This external scheduler hits /api/cron hourly so the
+# endpoint can notify ~2h before each user's local sunset.
+on:
+  schedule:
+    - cron: '0 * * * *' # every hour, on the hour (UTC)
+  workflow_dispatch: {} # allow manual runs from the Actions tab
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call /api/cron
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$APP_URL" ] || [ -z "$CRON_SECRET" ]; then
+            echo "APP_URL and CRON_SECRET repo secrets must be set." >&2
+            exit 1
+          fi
+          code=$(curl -sS -o /tmp/cron-body -w '%{http_code}' \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "${APP_URL%/}/api/cron")
+          echo "HTTP $code"
+          cat /tmp/cron-body
+          echo
+          [ "$code" = "200" ]
