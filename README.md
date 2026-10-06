@@ -3,14 +3,14 @@
 Sunset Quality Prediction web app built with SvelteKit and TypeScript. It estimates how good tonight's sunset will be for a given location using weather data, solar geometry, and a heuristic scoring model. It can also predict whether you'll see a sunset during a flight and which side of the plane to sit on.
 
 ### Features
-- Predicts sunset quality with a confidence score and human‑readable explanation
+- Predicts **sunset or sunrise** quality (switch in Location mode) with a confidence score and human‑readable explanation
 - **In‑flight sunset prediction**: enter departure/arrival airports and times to find out if you'll catch a sunset mid‑flight, which side of the plane to sit on, and how good it will be
 - Airport search across 5,469 worldwide airports (IATA code, city, or name)
 - Optional flight number lookup via AviationStack API
 - Great‑circle route interpolation with sunset window detection along the flight path
 - Seat side recommendation based on sun azimuth vs. plane heading
 - Adapted in‑flight scoring model (cloud‑top views as bonus, reduced surface penalties)
-- Uses actual sunset time (SunCalc) to pick the forecast hour; after tonight's sunset it switches to tomorrow's
+- Uses the actual sunrise/sunset time (SunCalc) to pick the forecast hour; once today's event has passed (+30 min for sunset, +15 min for sunrise) it switches to tomorrow's
 - **Sunset alerts**: opt‑in Web Push notification ~2 hours before a great sunset at your saved location
 - Serverless API using Open‑Meteo (hourly weather + air quality for aerosols/PM2.5)
 - In‑memory caching keyed by (lat, lon, sunset hour)
@@ -123,17 +123,19 @@ Core logic lives in:
 
 Request body:
 ```json
-{ "latitude": number, "longitude": number }
+{ "latitude": number, "longitude": number, "event": "sunset" | "sunrise" }
 ```
+`event` is optional and defaults to `"sunset"`. Deep links accept the same: `/?lat=…&lon=…&label=…&event=sunrise`.
 
 Response (shape abbreviated):
 ```json
 {
+  "event": "sunset",
   "qualityScore": 0-100,
   "confidence": 0-100,
   "explanation": { "factors": { /* human-readable factor details */ } },
-  "day": "today", // or "tomorrow" once tonight's sunset has passed
-  "timings": { "sunsetEpochSec": 1730003000, "goldenHourEpochSec": 1730000400 },
+  "day": "today", // local date of the event: "today" or "tomorrow"
+  "timings": { "eventEpochSec": 1730003000, "goldenHourEpochSec": 1730000400 }, // golden hour start (sunset) or end (sunrise); sunsetEpochSec is deprecated
   "used": {
     "epochSec": 1730000000, // UTC epoch of the scored hour
     "latitude": 52.52,
@@ -293,11 +295,14 @@ Optional. Copy `.env.example` to `.env.local` and set `DATABASE_URL`, the VAPID 
 ---
 
 ## Sunset ratings ("How was it?")
-Optional, for calibrating the scoring model. Needs `DATABASE_URL` and `RATING_SECRET`; run `npm run db:push` (or apply `drizzle/0001_*.sql`) to create the `sunset_ratings` table.
+Optional, for calibrating the scoring model. Needs `DATABASE_URL` and `RATING_SECRET` plus the `sunset_ratings` table (see [Database migrations](#database-migrations)).
 
-- Each location prediction includes a signed `ratingToken`: a snapshot of the weather inputs, score, confidence and `SCORING_VERSION`.
-- The browser remembers the last few predictions viewed. From 15 minutes before sunset until 24 hours after, the app asks "How was the sunset?" (1–5).
-- `POST /api/ratings` verifies the token and stores the rating with the snapshot, at most one per device, sunset and location. Coordinates are rounded to ~1 km; no other personal data is stored.
+- Each location prediction includes a signed `ratingToken`: a snapshot of the event, weather inputs, score, confidence and `SCORING_VERSION`.
+- The browser remembers the last few predictions viewed. From 15 minutes before the sunrise or sunset until 24 hours after, the app asks "How was the sunrise/sunset?" (1–5).
+- `POST /api/ratings` verifies the token and stores the rating with the snapshot and its `event`, at most one per device, event and location. Coordinates are rounded to ~1 km; no other personal data is stored. (`sunset_at` holds the time of either event; the names predate sunrise mode.)
+
+## Database migrations
+SQL migrations live in `drizzle/` (`npm run db:generate` creates new ones from `src/lib/server/db/schema.ts`). Apply each new file to Neon **before** deploying the code that uses it, either by running its SQL or with `npm run db:push`. Don't use `drizzle-kit migrate`: the database has no migrations table, so it would try to re-run `0000`.
 
 ---
 

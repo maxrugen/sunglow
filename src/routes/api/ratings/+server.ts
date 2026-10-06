@@ -6,7 +6,7 @@ import { inRatingWindow, ratingsConfigured, verifyRatingToken } from '$lib/serve
 
 const DEVICE_ID = /^[A-Za-z0-9-]{8,64}$/;
 
-/** POST { token, rating: 1–5, deviceId } — records how a predicted sunset actually looked. */
+/** POST { token, rating: 1–5, deviceId } — records how a predicted sunrise or sunset actually looked. */
 export const POST: RequestHandler = async ({ request }) => {
   if (!ratingsConfigured()) {
     return json({ error: 'Ratings are not enabled.' }, { status: 501 });
@@ -30,15 +30,16 @@ export const POST: RequestHandler = async ({ request }) => {
   if (!snapshot) {
     return json({ error: 'Invalid rating token.' }, { status: 400 });
   }
-  if (!inRatingWindow(snapshot.sunsetEpochSec)) {
-    return json({ error: 'This sunset can no longer be rated.' }, { status: 410 });
+  if (!inRatingWindow(snapshot.eventEpochSec)) {
+    return json({ error: `This ${snapshot.event} can no longer be rated.` }, { status: 410 });
   }
 
   const values = {
+    event: snapshot.event,
     deviceId: body.deviceId,
     latitude: snapshot.latitude,
     longitude: snapshot.longitude,
-    sunsetAt: new Date(snapshot.sunsetEpochSec * 1000),
+    sunsetAt: new Date(snapshot.eventEpochSec * 1000),
     rating,
     predictedScore: snapshot.predictedScore,
     confidence: snapshot.confidence,

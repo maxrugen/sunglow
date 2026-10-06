@@ -1,6 +1,7 @@
 <script lang="ts">
     import type { ClientPrediction } from '$lib/types';
     import { scoreLabel } from '$lib/score';
+    import { EVENT_COPY } from '$lib/events';
 
     interface Props {
         prediction: ClientPrediction | null;
@@ -13,6 +14,7 @@
     let description = $derived(scoreLabel(score));
     let confidence = $derived(prediction?.confidence);
     let isTomorrow = $derived(prediction?.day === 'tomorrow');
+    let copy = $derived(EVENT_COPY[prediction?.event ?? 'sunset']);
 
     /**
      * Wall-clock time at the forecast location (not the viewer's zone): shift by
@@ -41,11 +43,11 @@
         } else if (fx.lowCloud?.value > 60) {
             parts.push('Extensive low clouds likely blocked the sun near the horizon.');
         }
-        // Clouds toward the setting sun
+        // Clouds toward the rising/setting sun
         if (fx.horizon?.net < 0) {
-            parts.push('Clouds toward the setting sun may block the light before it reaches the sky overhead.');
+            parts.push(`Clouds toward the ${copy.sunAdjective} sun may block the light before it reaches the sky overhead.`);
         } else if (fx.horizon?.net > 0) {
-            parts.push('The sky toward the setting sun looks clear, so light can reach the clouds overhead.');
+            parts.push(`The sky toward the ${copy.sunAdjective} sun looks clear, so light can reach the clouds overhead.`);
         }
         // High clouds canvas
         if (fx.highCloud) {
@@ -68,7 +70,7 @@
         // Precipitation
         if (fx.precipitation) {
             if (fx.precipitation.probability > 50 || (fx.precipitation.rateMmH ?? 0) > 0.2) {
-                parts.push('Showers around sunset reduce the chance of vivid skies.');
+                parts.push(`Showers around ${copy.noun} reduce the chance of vivid skies.`);
             }
         }
         // Aerosols
@@ -89,10 +91,10 @@
 
         // Fall back if empty
         if (parts.length === 0) {
-            if (score >= 80) return 'Conditions look excellent for a colorful sunset.';
-            if (score >= 65) return 'Conditions are decent for some color near sunset.';
+            if (score >= 80) return `Conditions look excellent for a colorful ${copy.noun}.`;
+            if (score >= 65) return `Conditions are decent for some color near ${copy.noun}.`;
             if (score >= 40) return 'Conditions are marginal; some color is possible.';
-            return 'Clouds or haze likely limit a colorful sunset today.';
+            return `Clouds or haze likely limit a colorful ${copy.noun}.`;
         }
         return parts.join(' ');
     }
@@ -100,23 +102,23 @@
 
 <section class="card">
     <h2>
-        {isTomorrow ? "Tomorrow's Sunset" : 'Sunset Quality'}: <span class="accent">{score}%</span>
+        {isTomorrow ? `Tomorrow's ${copy.title}` : `${copy.title} Quality`}: <span class="accent">{score}%</span>
         <small class="badge">{description}</small>
     </h2>
     {#if locationLabel}
         <p class="location">{locationLabel}</p>
     {/if}
     {#if isTomorrow}
-        <p class="day-note">Tonight's sunset has passed, so this is the forecast for tomorrow.</p>
+        <p class="day-note">{copy.dayPassedNote}</p>
     {/if}
 
     <div class="metrics">
         <div class="row">
-            <span>Sunset</span>
-            <strong>{formatTime(prediction?.timings?.sunset)}</strong>
+            <span>{copy.title}</span>
+            <strong>{formatTime(prediction?.timings?.event)}</strong>
         </div>
         <div class="row">
-            <span>Golden Hour</span>
+            <span>{copy.goldenHourLabel}</span>
             <strong>{formatTime(prediction?.timings?.goldenHour)}</strong>
         </div>
         {#if confidence !== undefined}

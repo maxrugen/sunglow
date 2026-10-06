@@ -1,10 +1,10 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { predictSunset, PredictionError } from '$lib/server/prediction';
+import { predictEvent, PredictionError } from '$lib/server/prediction';
 import { createRatingToken } from '$lib/server/ratings';
 
 export const POST: RequestHandler = async ({ request }) => {
-  let body: { latitude?: unknown; longitude?: unknown };
+  let body: { latitude?: unknown; longitude?: unknown; event?: unknown };
   try {
     body = await request.json();
   } catch {
@@ -17,8 +17,13 @@ export const POST: RequestHandler = async ({ request }) => {
     return json({ error: 'Invalid or missing latitude/longitude' }, { status: 400 });
   }
 
+  const event = body?.event ?? 'sunset';
+  if (event !== 'sunset' && event !== 'sunrise') {
+    return json({ error: "event must be 'sunset' or 'sunrise'" }, { status: 400 });
+  }
+
   try {
-    const payload = await predictSunset({ latitude, longitude });
+    const payload = await predictEvent({ latitude, longitude, event });
     // Short-lived caching by proxies/clients; the server also caches per sunset hour.
     return json(
       { ...payload, ratingToken: createRatingToken(payload) },

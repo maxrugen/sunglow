@@ -9,8 +9,8 @@ vi.stubGlobal('localStorage', {
 });
 
 const SUNSET = 1_790_000_000;
-function prediction(sunsetSec: number, token = `token-${sunsetSec}`): ClientPrediction {
-  return { qualityScore: 75, day: 'today', timings: { sunset: new Date(sunsetSec * 1000), goldenHour: null }, ratingToken: token };
+function prediction(sunsetSec: number, token = `token-${sunsetSec}`, event: 'sunset' | 'sunrise' = 'sunset'): ClientPrediction {
+  return { event, qualityScore: 75, day: 'today', timings: { event: new Date(sunsetSec * 1000), goldenHour: null }, ratingToken: token };
 }
 
 beforeEach(() => store.clear());
@@ -48,6 +48,20 @@ describe('rating store', () => {
   it('ignores predictions without a rating token', () => {
     rememberForRating({ ...prediction(SUNSET), ratingToken: undefined }, 'Berlin');
     expect(dueRating(SUNSET + 600)).toBeNull();
+  });
+
+  it('keeps a sunrise and a sunset at the same place apart', () => {
+    rememberForRating(prediction(SUNSET, 'set'), 'Berlin');
+    rememberForRating(prediction(SUNSET + 12 * 3600, 'rise', 'sunrise'), 'Berlin');
+    const first = dueRating(SUNSET + 12 * 3600 + 600)!;
+    expect(first.event).toBe('sunset');
+    forgetRating(first);
+    expect(dueRating(SUNSET + 12 * 3600 + 600)?.event).toBe('sunrise');
+  });
+
+  it('reads items saved before sunrise mode as sunsets', () => {
+    store.set('sunglow:pending-ratings', JSON.stringify([{ token: 'old', label: 'Berlin', sunsetEpochSec: SUNSET, predictedScore: 70 }]));
+    expect(dueRating(SUNSET + 600)).toEqual({ token: 'old', label: 'Berlin', event: 'sunset', eventEpochSec: SUNSET, predictedScore: 70 });
   });
 
   it('reuses one device id', () => {

@@ -7,11 +7,12 @@ const { createRatingToken, verifyRatingToken, inRatingWindow, ratingsConfigured 
 const { SCORING_VERSION } = await import('./scoring');
 
 const prediction = {
+  event: 'sunset' as const,
   qualityScore: 82,
   confidence: 90,
   weatherData: { highCloud: 50, midCloud: 30, lowCloud: 5, humidity: 50, aod: 0.2 },
   used: { latitude: 52.52437, longitude: 13.41053 },
-  timings: { sunsetEpochSec: 1_790_000_000 },
+  timings: { eventEpochSec: 1_790_000_000 },
 };
 
 beforeEach(() => {
@@ -23,9 +24,10 @@ describe('rating tokens', () => {
   it('round-trips a snapshot with rounded coordinates and the scoring version', () => {
     const snapshot = verifyRatingToken(createRatingToken(prediction)!);
     expect(snapshot).toEqual({
+      event: 'sunset',
       latitude: 52.52,
       longitude: 13.41,
-      sunsetEpochSec: 1_790_000_000,
+      eventEpochSec: 1_790_000_000,
       predictedScore: 82,
       confidence: 90,
       scoringVersion: SCORING_VERSION,
@@ -58,7 +60,22 @@ describe('rating tokens', () => {
   });
 
   it('skips predictions without a sunset', () => {
-    expect(createRatingToken({ ...prediction, timings: { sunsetEpochSec: null } })).toBeUndefined();
+    expect(createRatingToken({ ...prediction, timings: { eventEpochSec: null } })).toBeUndefined();
+  });
+
+  it('carries the event for sunrise predictions', () => {
+    const snapshot = verifyRatingToken(createRatingToken({ ...prediction, event: 'sunrise' })!);
+    expect(snapshot?.event).toBe('sunrise');
+  });
+
+  it('still reads tokens issued before sunrise mode', async () => {
+    const { createHmac } = await import('node:crypto');
+    const legacy = { latitude: 52.52, longitude: 13.41, sunsetEpochSec: 1_790_000_000, predictedScore: 82, confidence: 90, scoringVersion: 1, weather: {} };
+    const body = Buffer.from(JSON.stringify(legacy)).toString('base64url');
+    const sig = createHmac('sha256', 'test-secret').update(body).digest('base64url');
+    const snapshot = verifyRatingToken(`${body}.${sig}`);
+    expect(snapshot).toMatchObject({ event: 'sunset', eventEpochSec: 1_790_000_000, predictedScore: 82 });
+    expect(snapshot).not.toHaveProperty('sunsetEpochSec');
   });
 });
 

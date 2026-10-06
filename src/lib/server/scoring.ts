@@ -19,7 +19,7 @@ export type WeatherData = {
   visibilityM?: number;
   dewPointSpreadC?: number;
   pm25UgM3?: number;
-  /** Share (0–100) of the path toward the setting sun blocked by low/mid cloud. */
+  /** Share (0–100) of the path toward the rising/setting sun blocked by low/mid cloud. */
   horizonCloud?: number;
 };
 
@@ -222,7 +222,7 @@ export function calculateWithDetails(weatherData: WeatherData): {
   };
 }
 
-export function calculateConfidence(weatherData: WeatherData, alignedToSunset: boolean): number {
+export function calculateConfidence(weatherData: WeatherData, alignedToEvent: boolean): number {
   let confidence = 90;
 
   const pop = weatherData.precipitationProbability ?? 0;
@@ -235,29 +235,29 @@ export function calculateConfidence(weatherData: WeatherData, alignedToSunset: b
   if (low > 60) confidence -= 25;
   if (vis !== undefined && vis < 5000) confidence -= 15;
   if (pm25 !== undefined && pm25 > 60) confidence -= 10;
-  if (!alignedToSunset) confidence -= 10;
+  if (!alignedToEvent) confidence -= 10;
 
   return clampScore(confidence);
 }
 
-export function evaluate(weatherData: WeatherData, alignedToSunset: boolean): Evaluation {
+export function evaluate(weatherData: WeatherData, alignedToEvent: boolean): Evaluation {
   const { score, details } = calculateWithDetails(weatherData);
-  const confidence = calculateConfidence(weatherData, alignedToSunset);
+  const confidence = calculateConfidence(weatherData, alignedToEvent);
   return { score, details, confidence };
 }
 
 // ── In-flight model ─────────────────────────────────────────────────
 
 /**
- * In-flight sunset scoring: adapts the ground-level model for cruise altitude (~10km).
+ * In-flight sunrise/sunset scoring: adapts the ground-level model for cruise altitude (~10km).
  *
  * Key differences from ground-level evaluate():
- * - Low clouds are *below* the plane → penalty is inverted to a mild bonus (cloud-top sunsets)
+ * - Low clouds are *below* the plane → penalty is inverted to a mild bonus (cloud-top views)
  * - PM2.5 is irrelevant at altitude → ignored
  * - Humidity, precipitation, visibility and surface wind matter less
  * - Confidence is lower because forecasts are surface-level
  */
-export function evaluateInFlight(weatherData: WeatherData, alignedToSunset: boolean): Evaluation {
+export function evaluateInFlight(weatherData: WeatherData, alignedToEvent: boolean): Evaluation {
   const {
     highCloud,
     midCloud,
@@ -324,7 +324,7 @@ export function evaluateInFlight(weatherData: WeatherData, alignedToSunset: bool
   const precip = precipitationMmPerHour ?? 0;
   if (pop > 50 || precip > 0.5) confidence -= 15;
   if (highCloud > 80) confidence -= 15; // high cloud at cruise is the main concern
-  if (!alignedToSunset) confidence -= 10;
+  if (!alignedToEvent) confidence -= 10;
   confidence -= 5; // surface weather may not reflect conditions at 10km
 
   return {
