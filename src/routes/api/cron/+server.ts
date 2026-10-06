@@ -3,10 +3,12 @@ import { eq } from 'drizzle-orm';
 import SunCalc from 'suncalc';
 import type { RequestHandler } from './$types';
 import { env } from '$env/dynamic/private';
+import { dev } from '$app/environment';
 import { db } from '$lib/server/db';
 import { pushSubscriptions } from '$lib/server/db/schema';
 import { sendPush } from '$lib/server/webpush';
 import { predictSunset } from '$lib/server/prediction';
+import type { PushSubscriptionRow } from '$lib/server/db/schema';
 
 export const config = { maxDuration: 60 };
 
@@ -15,12 +17,17 @@ function num(value: string | undefined, fallback: number): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
-/** Bearer header or ?key= query param, matching CRON_SECRET. Open if unset. */
-function cronAuthorized(request: Request, url: URL): boolean {
+/** Subscribers checked in parallel; bounded to stay polite to Open-Meteo. */
+const CONCURRENCY = 5;
+
+/**
+ * Bearer header matching CRON_SECRET (Vercel Cron sends this automatically).
+ * Without a secret the endpoint is only open in local dev.
+ */
+function cronAuthorized(request: Request): boolean {
   const secret = env.CRON_SECRET;
-  if (!secret) return true;
-  if (request.headers.get('authorization') === `Bearer ${secret}`) return true;
-  return url.searchParams.get('key') === secret;
+  if (!secret) return dev;
+  return request.headers.get('authorization') === `Bearer ${secret}`;
 }
 
 function utcDateKey(d: Date): string {
@@ -41,7 +48,7 @@ function localHM(dateUtc: Date, utcOffsetSeconds: number): string | null {
 }
 
 async function handle(request: Request, url: URL) {
-  if (!cronAuthorized(request, url)) {
+  if (!cronAuthorized(request)) {
     return json({ error: 'unauthorized' }, { status: 401 });
   }
 
@@ -62,24 +69,24 @@ async function handle(request: Request, url: URL) {
   let failed = 0;
   let skipped = 0;
 
-  for (const sub of subs) {
+  async function processSubscription(sub: PushSubscriptionRow) {
     checked++;
     const times = SunCalc.getTimes(new Date(), sub.latitude, sub.longitude);
     const sunset = times.sunset;
     if (!(sunset instanceof Date) || isNaN(sunset.getTime())) {
       skipped++;
-      continue;
+      return;
     }
     const leadMs = sunset.getTime() - now;
     // Only act in the target hour before sunset (matches the hourly scheduler).
     if (leadMs < leadWindowStart || leadMs >= leadWindowEnd) {
       skipped++;
-      continue;
+      return;
     }
     const dayKey = utcDateKey(sunset);
     if (sub.lastNotifiedDate === dayKey) {
       skipped++;
-      continue;
+      return;
     }
 
     let payload;
@@ -87,7 +94,7 @@ async function handle(request: Request, url: URL) {
       payload = await predictSunset({ latitude: sub.latitude, longitude: sub.longitude });
     } catch {
       failed++;
-      continue;
+      return;
     }
 
     if (payload.qualityScore < scoreMin || payload.confidence < confidenceMin) {
@@ -97,7 +104,7 @@ async function handle(request: Request, url: URL) {
         .set({ lastNotifiedDate: dayKey })
         .where(eq(pushSubscriptions.endpoint, sub.endpoint));
       skipped++;
-      continue;
+      return;
     }
 
     const label = sub.label || 'your location';
@@ -131,6 +138,21 @@ async function handle(request: Request, url: URL) {
       failed++;
     }
   }
+
+  // A fixed pool of workers drains the shared queue.
+  const queue = [...subs];
+  await Promise.all(
+    Array.from({ length: Math.min(CONCURRENCY, queue.length) }, async () => {
+      for (let sub = queue.shift(); sub; sub = queue.shift()) {
+        try {
+          await processSubscription(sub);
+        } catch {
+          // A DB error for one subscriber shouldn't abort the whole run.
+          failed++;
+        }
+      }
+    })
+  );
 
   return json({ checked, sent, pruned, failed, skipped });
 }

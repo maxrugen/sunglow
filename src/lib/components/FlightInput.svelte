@@ -1,13 +1,12 @@
 <script lang="ts">
     import { createEventDispatcher } from 'svelte';
-    import airportsData from '$lib/data/airports.json';
+    import type { Airport } from '$lib/types';
 
-    type Airport = { iata: string; name: string; city: string; country: string; lat: number; lon: number };
+    /** Whether the server has an AviationStack key (decided in the page load). */
+    export let lookupAvailable: boolean = false;
     type FlightSubmitDetail = { depIata: string; arrIata: string; depTime: string; arrTime: string };
 
     const dispatch = createEventDispatcher<{ flightSubmit: FlightSubmitDetail; flightError: { message: string }; switchMode: void }>();
-
-    const airports: Airport[] = airportsData as Airport[];
 
     /** Today's date in the browser's zone as YYYY-MM-DD (toISOString would give the UTC date). */
     function localDateString(d = new Date()): string {
@@ -18,12 +17,6 @@
     let flightCode: string = '';
     let flightDate: string = localDateString();
     let isLookingUp: boolean = false;
-    let lookupAvailable: boolean = false;
-
-    // Check if flight lookup is available
-    fetch('/api/flight-lookup?flight=TEST', { method: 'HEAD' }).then(r => {
-        lookupAvailable = r.status !== 501;
-    }).catch(() => {});
 
     // Manual entry state
     let depSearch: string = '';
@@ -46,37 +39,54 @@
     // Default date: today
     let dateStr: string = localDateString();
 
-    function searchAirport(query: string): Airport[] {
+    // Airport search runs on the server so the dataset stays out of the bundle.
+    const searchCache = new Map<string, Airport[]>();
+    async function searchAirport(query: string): Promise<Airport[]> {
         const q = query.trim().toUpperCase();
         if (q.length < 2) return [];
-        // IATA exact match first
-        const exactIata = airports.filter(a => a.iata === q);
-        if (exactIata.length > 0) return exactIata.slice(0, 8);
-        // Filter by IATA prefix, then city/name substring
-        const byIata = airports.filter(a => a.iata.startsWith(q));
-        const byName = airports.filter(a =>
-            !a.iata.startsWith(q) && (
-                a.name.toUpperCase().includes(q) ||
-                a.city.toUpperCase().includes(q)
-            )
-        );
-        return [...byIata, ...byName].slice(0, 8);
+        const cached = searchCache.get(q);
+        if (cached) return cached;
+        try {
+            const res = await fetch(`/api/airports?q=${encodeURIComponent(q)}`);
+            if (!res.ok) return [];
+            const results: Airport[] = (await res.json())?.results ?? [];
+            searchCache.set(q, results);
+            return results;
+        } catch {
+            return [];
+        }
     }
 
+    let depDebounce: ReturnType<typeof setTimeout>;
+    let arrDebounce: ReturnType<typeof setTimeout>;
+
     function onDepInput() {
-        depResults = searchAirport(depSearch);
-        depActiveIndex = depResults.length > 0 ? 0 : -1;
         if (selectedDep && depSearch !== `${selectedDep.iata} – ${selectedDep.name}`) {
             selectedDep = null;
         }
+        clearTimeout(depDebounce);
+        depDebounce = setTimeout(async () => {
+            const query = depSearch;
+            const results = await searchAirport(query);
+            // Ignore responses for text the user has since changed.
+            if (query !== depSearch || selectedDep) return;
+            depResults = results;
+            depActiveIndex = results.length > 0 ? 0 : -1;
+        }, 150);
     }
 
     function onArrInput() {
-        arrResults = searchAirport(arrSearch);
-        arrActiveIndex = arrResults.length > 0 ? 0 : -1;
         if (selectedArr && arrSearch !== `${selectedArr.iata} – ${selectedArr.name}`) {
             selectedArr = null;
         }
+        clearTimeout(arrDebounce);
+        arrDebounce = setTimeout(async () => {
+            const query = arrSearch;
+            const results = await searchAirport(query);
+            if (query !== arrSearch || selectedArr) return;
+            arrResults = results;
+            arrActiveIndex = results.length > 0 ? 0 : -1;
+        }, 150);
     }
 
     function selectDep(a: Airport) {
@@ -127,11 +137,8 @@
             if (!res.ok) { errorMessage = data.error || 'Flight lookup failed.'; return; }
 
             // Populate fields from lookup
-            const depAp = airports.find(a => a.iata === data.departure?.iata?.toUpperCase());
-            const arrAp = airports.find(a => a.iata === data.arrival?.iata?.toUpperCase());
-
-            if (depAp) selectDep(depAp);
-            if (arrAp) selectArr(arrAp);
+            if (data.departure?.match) selectDep(data.departure.match);
+            if (data.arrival?.match) selectArr(data.arrival.match);
 
             // AviationStack's scheduled times are airport-local despite the "+00:00"
             // suffix, so take the wall-clock part as-is instead of parsing it.

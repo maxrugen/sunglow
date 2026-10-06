@@ -184,6 +184,9 @@ Response (shape abbreviated):
 
 If no sunset occurs during the flight, returns `sunsetDuringFlight: false` with a message.
 
+#### Airport Search
+`GET /api/airports?q=munich` → up to 8 airports (exact IATA match, then IATA prefix, then city/name substring). Runs server‑side so the airport dataset isn't shipped to the browser.
+
 #### Flight Lookup (optional)
 `GET /api/flight-lookup?flight=AA1004&date=2026-04-15` → AviationStack proxy (requires `AVIATIONSTACK_API_KEY` env var; returns 501 when not configured)
 
@@ -201,7 +204,7 @@ If no sunset occurs during the flight, returns `sunsetDuringFlight: false` with 
 
 - `src/lib/components/FlightInput.svelte`
   - Airport search across 5,469 airports (IATA prefix match + city/name substring)
-  - Optional flight number lookup (auto‑detects availability)
+  - Optional flight number lookup (shown when the server has an AviationStack key)
   - Date, departure time, and arrival time fields with next‑day handling
   - Keyboard navigation and validation
 
@@ -243,6 +246,9 @@ src/
       airports.json                # 5,469 airports (OurAirports)
     server/
       scoring.ts                   # scoring + confidence + evaluate + evaluateInFlight
+      weather.ts                   # Open-Meteo fetches, hour selection, weighted composites
+      prediction.ts                # location prediction (shared by API, deep links, cron)
+      airports.ts                  # airport lookup + search
       flight-route.ts              # great-circle interpolation, sunset windows, seat side
       flight-route.test.ts         # 25 unit tests
       scoring.test.ts              # 30 unit tests
@@ -252,6 +258,7 @@ src/
     +page.server.ts                # SSR prefetch (lat/lon/label via query)
     api/
       predict/+server.js           # location prediction endpoint
+      airports/+server.ts          # airport search
       predict-flight/+server.ts    # flight prediction endpoint
       flight-lookup/+server.ts     # AviationStack proxy (optional)
       geocode/+server.ts           # city → coords proxy
