@@ -3,9 +3,21 @@
     import Combobox from './Combobox.svelte';
 
     type FlightSubmitDetail = { depIata: string; arrIata: string; depTime: string; arrTime: string };
+    type ScheduledFlight = {
+        flightIata: string;
+        depIata: string;
+        arrIata: string;
+        depName?: string;
+        arrName?: string;
+        depTime: string;
+        arrTime: string;
+        durationMin?: number;
+        codeshares: string[];
+    };
+    type SearchMode = 'number' | 'route' | 'manual';
 
     interface Props {
-        /** Whether the server has an AviationStack key (decided in the page load). */
+        /** Whether the server can search flight timetables (decided in the page load). */
         lookupAvailable?: boolean;
         onFlightSubmit: (flight: FlightSubmitDetail) => void;
         onSwitchMode: () => void;
@@ -18,25 +30,37 @@
         return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     }
 
-    // Flight number lookup state
-    let flightCode: string = $state('');
-    let flightDate: string = $state(localDateString());
-    let isLookingUp: boolean = $state(false);
+    const MODES: Array<{ id: SearchMode; label: string }> = [
+        { id: 'number', label: 'Flight number' },
+        { id: 'route', label: 'Route' },
+        { id: 'manual', label: 'Enter times' },
+    ];
+    let mode: SearchMode = $state('manual');
+    $effect(() => {
+        // Searching needs the server's timetable API; without it only manual entry works.
+        mode = lookupAvailable ? 'number' : 'manual';
+    });
 
-    // Manual entry state
+    // Shared between the tabs, so switching keeps what was entered.
+    let flightCode: string = $state('');
+    let dateStr: string = $state(localDateString());
     let depSearch: string = $state('');
     let arrSearch: string = $state('');
     let depResults: Airport[] = $state([]);
     let arrResults: Airport[] = $state([]);
-    let selectedDep: Airport | null = null;
-    let selectedArr: Airport | null = null;
-    let dateStr: string = $state(localDateString());
+    let selectedDep: Airport | null = $state(null);
+    let selectedArr: Airport | null = $state(null);
     let depTime: string = $state('');
     let arrTime: string = $state('');
+
+    let isSearching: boolean = $state(false);
+    let schedules: ScheduledFlight[] = $state([]);
+    let searchMessage: string = $state('');
     let errorMessage: string = $state('');
 
     const airportLabel = (a: Airport) => `${a.iata} – ${a.name}`;
     const resultsStatus = (n: number) => (n ? `${n} airport${n === 1 ? '' : 's'} found` : '');
+    const duration = (min?: number) => (min ? `${Math.floor(min / 60)}h ${String(min % 60).padStart(2, '0')}m` : '');
 
     // Airport search runs on the server so the dataset stays out of the bundle.
     const searchCache = new Map<string, Airport[]>();
@@ -90,82 +114,73 @@
         arrResults = [];
     }
 
-    async function lookupFlight() {
+    function switchTo(next: SearchMode) {
+        mode = next;
         errorMessage = '';
-        const code = flightCode.trim().toUpperCase();
-        if (!code) { errorMessage = 'Enter a flight code (e.g. AA1004)'; return; }
+        searchMessage = '';
+        schedules = [];
+    }
 
-        isLookingUp = true;
+    /** Wall-clock times without an offset: the server reads each in its airport's zone. */
+    function predict(depIata: string, arrIata: string, dep: string, arr: string) {
+        onFlightSubmit({ depIata, arrIata, depTime: `${dateStr}T${dep}:00`, arrTime: `${dateStr}T${arr}:00` });
+    }
+
+    async function findFlights(e: SubmitEvent) {
+        e.preventDefault();
+        errorMessage = '';
+        searchMessage = '';
+        schedules = [];
+
+        const params = new URLSearchParams({ date: dateStr });
+        if (mode === 'number') {
+            const code = flightCode.trim().toUpperCase().replace(/\s+/g, '');
+            if (!code) { errorMessage = 'Enter a flight number, like UA2410.'; return; }
+            params.set('flight', code);
+        } else {
+            if (!selectedDep) { errorMessage = 'Pick a departure airport.'; return; }
+            if (!selectedArr) { errorMessage = 'Pick an arrival airport.'; return; }
+            params.set('from', selectedDep.iata);
+            params.set('to', selectedArr.iata);
+        }
+        if (!dateStr) { errorMessage = 'Pick a date.'; return; }
+
+        isSearching = true;
         try {
-            const res = await fetch(`/api/flight-lookup?flight=${encodeURIComponent(code)}&date=${encodeURIComponent(flightDate)}`);
-            const data = await res.json();
-            if (!res.ok) { errorMessage = data.error || 'Flight lookup failed.'; return; }
-
-            // Populate fields from lookup
-            if (data.departure?.match) selectDep(data.departure.match);
-            if (data.arrival?.match) selectArr(data.arrival.match);
-
-            // AviationStack's scheduled times are airport-local despite the "+00:00"
-            // suffix, so take the wall-clock part as-is instead of parsing it.
-            if (data.departure?.scheduled) {
-                depTime = data.departure.scheduled.slice(11, 16);
-                dateStr = data.departure.scheduled.slice(0, 10);
-            }
-            if (data.arrival?.scheduled) {
-                arrTime = data.arrival.scheduled.slice(11, 16);
+            const res = await fetch(`/api/flight-schedules?${params.toString()}`);
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) { errorMessage = data.error || 'Flight search failed. Try again, or enter the times.'; return; }
+            schedules = data.flights ?? [];
+            searchMessage = data.message ?? '';
+            // A flight number usually means one flight: go straight to the prediction.
+            if (mode === 'number' && schedules.length === 1) {
+                const f = schedules[0];
+                predict(f.depIata, f.arrIata, f.depTime, f.arrTime);
             }
         } catch {
-            errorMessage = 'Flight lookup failed. Please enter details manually.';
+            errorMessage = "Can't reach Sunglow right now. Check your connection and try again.";
         } finally {
-            isLookingUp = false;
+            isSearching = false;
         }
     }
 
-    function submit(e: SubmitEvent) {
+    function submitManual(e: SubmitEvent) {
         e.preventDefault();
         errorMessage = '';
         if (!selectedDep) { errorMessage = 'Select a departure airport.'; return; }
         if (!selectedArr) { errorMessage = 'Select an arrival airport.'; return; }
         if (!depTime) { errorMessage = 'Enter departure time.'; return; }
         if (!arrTime) { errorMessage = 'Enter arrival time.'; return; }
-
-        // Wall-clock times without an offset: the server reads each one in its
-        // airport's time zone and picks the arrival date (overnight, date line).
-        onFlightSubmit({
-            depIata: selectedDep.iata,
-            arrIata: selectedArr.iata,
-            depTime: `${dateStr}T${depTime}:00`,
-            arrTime: `${dateStr}T${arrTime}:00`,
-        });
-    }
-
-    function onLookupSubmit(e: SubmitEvent) {
-        e.preventDefault();
-        lookupFlight();
+        predict(selectedDep.iata, selectedArr.iata, depTime, arrTime);
     }
 </script>
 
-<div class="flight-input">
-    {#if lookupAvailable}
-        <form class="lookup-section" onsubmit={onLookupSubmit}>
-            <label class="field-label" for="flight-code-input">Flight number (optional)</label>
-            <div class="lookup-row">
-                <input id="flight-code-input" type="text" placeholder="e.g. AA1004" bind:value={flightCode} maxlength="10" />
-                <label class="visually-hidden" for="flight-lookup-date">Flight date</label>
-                <input id="flight-lookup-date" type="date" bind:value={flightDate} />
-                <button class="btn" type="submit" disabled={isLookingUp}>
-                    {isLookingUp ? 'Looking up…' : 'Look up'}
-                </button>
-            </div>
-        </form>
-        <div class="divider"><span>or enter manually</span></div>
-    {/if}
-
-    <form class="fields" onsubmit={submit}>
+{#snippet airportField(which: 'dep' | 'arr')}
+    {#if which === 'dep'}
         <Combobox
             id="dep-input"
-            label="Departure airport"
-            placeholder="Search city or IATA code"
+            label="From"
+            placeholder="City or airport code"
             bind:value={depSearch}
             items={depResults}
             status={resultsStatus(depResults.length)}
@@ -177,11 +192,11 @@
                 <small>{a.city}, {a.country}</small>
             {/snippet}
         </Combobox>
-
+    {:else}
         <Combobox
             id="arr-input"
-            label="Arrival airport"
-            placeholder="Search city or IATA code"
+            label="To"
+            placeholder="City or airport code"
             bind:value={arrSearch}
             items={arrResults}
             status={resultsStatus(arrResults.length)}
@@ -193,55 +208,148 @@
                 <small>{a.city}, {a.country}</small>
             {/snippet}
         </Combobox>
+    {/if}
+{/snippet}
 
-        <div class="time-row">
-            <div class="field">
-                <label class="field-label" for="date-input">Departure date</label>
-                <input id="date-input" type="date" bind:value={dateStr} />
-            </div>
-            <div class="field">
-                <label class="field-label" for="dep-time">Departure time</label>
-                <input id="dep-time" type="time" bind:value={depTime} />
-            </div>
-            <div class="field">
-                <label class="field-label" for="arr-time">Arrival time</label>
-                <input id="arr-time" type="time" bind:value={arrTime} />
-            </div>
+{#snippet dateField()}
+    <div class="field">
+        <label class="field-label" for="flight-date">Date</label>
+        <input id="flight-date" type="date" bind:value={dateStr} />
+    </div>
+{/snippet}
+
+<div class="flight-input">
+    {#if lookupAvailable}
+        <div class="segmented" role="group" aria-label="How to find your flight">
+            {#each MODES as m}
+                <button type="button" class:active={mode === m.id} aria-pressed={mode === m.id} onclick={() => switchTo(m.id)}>
+                    {m.label}
+                </button>
+            {/each}
         </div>
-        <p class="time-hint">Enter local times at each airport, as shown on your ticket.</p>
+    {/if}
 
-        <p class="error-text form-error" role="alert">{errorMessage}</p>
-
-        <div class="actions">
+    {#if mode === 'manual'}
+        <form class="fields" onsubmit={submitManual}>
+            {@render airportField('dep')}
+            {@render airportField('arr')}
+            <div class="time-row">
+                {@render dateField()}
+                <div class="field">
+                    <label class="field-label" for="dep-time">Departure time</label>
+                    <input id="dep-time" type="time" bind:value={depTime} />
+                </div>
+                <div class="field">
+                    <label class="field-label" for="arr-time">Arrival time</label>
+                    <input id="arr-time" type="time" bind:value={arrTime} />
+                </div>
+            </div>
+            <p class="hint">Enter local times at each airport, as shown on your ticket.</p>
             <button class="btn primary" type="submit">Predict In-Flight Sun Views</button>
-            <button class="btn link" type="button" onclick={onSwitchMode}>← Back to location mode</button>
-        </div>
-    </form>
+        </form>
+    {:else}
+        <form class="fields" onsubmit={findFlights}>
+            {#if mode === 'number'}
+                <div class="row">
+                    <div class="field grow">
+                        <label class="field-label" for="flight-code">Flight number</label>
+                        <input id="flight-code" type="text" placeholder="e.g. UA2410" bind:value={flightCode} maxlength="8" autocomplete="off" />
+                    </div>
+                    {@render dateField()}
+                </div>
+            {:else}
+                {@render airportField('dep')}
+                {@render airportField('arr')}
+                {@render dateField()}
+            {/if}
+            <button class="btn primary" type="submit" disabled={isSearching}>
+                {isSearching ? 'Searching…' : mode === 'number' ? 'Find flight' : 'Find flights'}
+            </button>
+        </form>
+
+        {#if schedules.length > 0}
+            <div class="schedules">
+                <p class="hint">{schedules.length === 1 ? '1 flight' : `${schedules.length} flights`} on this day. Pick yours:</p>
+                <ul>
+                    {#each schedules as f (f.flightIata + f.depTime)}
+                        <li>
+                            <button type="button" class="schedule" onclick={() => predict(f.depIata, f.arrIata, f.depTime, f.arrTime)}>
+                                <span class="schedule-main">
+                                    <strong>{f.flightIata}</strong>
+                                    <span>{f.depIata} {f.depTime} → {f.arrIata} {f.arrTime}</span>
+                                </span>
+                                <small>
+                                    {duration(f.durationMin)}{#if f.codeshares.length}{duration(f.durationMin) ? ' · ' : ''}also {f.codeshares.slice(0, 3).join(', ')}{/if}
+                                </small>
+                            </button>
+                        </li>
+                    {/each}
+                </ul>
+                <p class="hint">Times are local at each airport, from the airline timetable.</p>
+            </div>
+        {/if}
+    {/if}
+
+    <!-- Stays mounted so new messages are announced. -->
+    <p class="message" role="status">{searchMessage}</p>
+    <p class="error-text message" role="alert">{errorMessage}</p>
+
+    <button class="btn link" type="button" onclick={onSwitchMode}>← Back to location mode</button>
 </div>
 
 <style>
     .flight-input { width: 100%; max-width: 640px; display: flex; flex-direction: column; gap: 1rem; }
     .fields { display: flex; flex-direction: column; gap: 1rem; }
     .field { position: relative; }
-    .field-label { display: block; font-size: 0.85rem; margin-bottom: 0.35rem; opacity: 0.9; }
-    .time-hint { margin: 0; font-size: 0.8rem; opacity: 0.85; }
+    .row { display: flex; gap: 0.75rem; align-items: flex-end; }
+    .grow { flex: 1; }
+    .field-label { display: block; font-size: 0.85rem; margin-bottom: 0.35rem; }
+    .hint { margin: 0; font-size: 0.8rem; }
+    .message { margin: 0; }
     .time-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.75rem; }
-    .lookup-section { display: flex; flex-direction: column; gap: 0.35rem; }
-    .lookup-row { display: flex; gap: 0.5rem; }
-    .lookup-row input[type="text"] { flex: 1; }
-    .lookup-row input[type="date"] { width: auto; }
-    .divider { text-align: center; opacity: 0.85; font-size: 0.85rem; margin: 0.25rem 0; }
-    .actions { display: flex; flex-direction: column; gap: 0.5rem; align-items: stretch; }
     .btn { border-color: var(--text-accent); }
     .btn.primary { font-weight: 600; }
-    .btn.link { background: transparent; border: none; font-size: 0.9rem; }
+    .btn.link { background: transparent; border: none; font-size: 0.9rem; align-self: center; }
     .btn.link:hover { transform: none; text-decoration: underline; }
-    /* Stays mounted (and in the accessibility tree) so new errors are announced. */
-    .form-error { margin: 0; }
     .iata { color: var(--text-accent); margin-right: 0.35rem; }
+
+    .segmented {
+        display: flex;
+        align-self: center;
+        gap: 0.25rem;
+        padding: 0.25rem;
+        border-radius: 999px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+    }
+    .segmented button {
+        padding: 0.35rem 1rem;
+        font-size: 0.85rem;
+        background: transparent;
+        border: none;
+        border-radius: 999px;
+        backdrop-filter: none;
+    }
+    .segmented button:hover { transform: none; }
+    .segmented button:not(.active):hover { background: var(--surface); }
+    .segmented button.active { background: var(--text-primary); color: var(--background-start); font-weight: 600; }
+
+    .schedules { display: flex; flex-direction: column; gap: 0.5rem; }
+    .schedules ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 0.4rem; }
+    .schedule {
+        width: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        text-align: left;
+        padding: 0.65rem 0.9rem;
+    }
+    .schedule-main { display: flex; gap: 0.75rem; align-items: baseline; flex-wrap: wrap; }
+    .schedule-main strong { color: var(--text-accent); }
 
     @media (max-width: 520px) {
         .time-row { grid-template-columns: 1fr; }
-        .lookup-row { flex-direction: column; }
+        .row { flex-direction: column; align-items: stretch; }
     }
 </style>

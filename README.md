@@ -6,7 +6,7 @@ Sunset and sunrise quality prediction web app built with SvelteKit and TypeScrip
 - Predicts **sunset or sunrise** quality (switch in Location mode) with a confidence score and human‑readable explanation
 - **In‑flight sunrise/sunset prediction**: enter departure/arrival airports and times to find out if you'll catch a sunrise or sunset mid‑flight, which side of the plane to sit on, and how good it will be
 - Airport search across 5,469 worldwide airports (IATA code, city, or name)
-- Optional flight number lookup via AviationStack API
+- Find your flight by **number** (e.g. UA2410) or by **route** (from, to, date) via AirLabs timetables, so no times need typing; manual entry stays as a fallback
 - Great‑circle route interpolation with sunrise/sunset window detection along the flight path (a very long flight can show several)
 - Seat side recommendation based on sun azimuth vs. plane heading ("either side" when the sun is within 20° of the nose or tail)
 - Adapted in‑flight scoring model (cloud‑top views as bonus, reduced surface penalties)
@@ -54,9 +54,9 @@ npm run typecheck
 
 No API keys are required for basic usage; all weather and geocoding APIs are public endpoints.
 
-For optional flight number lookup, set your AviationStack API key:
+To find flights by number or route in Flight mode, add an AirLabs key (free plan: 1,000 requests a month) to `.env.local`:
 ```bash
-AVIATIONSTACK_API_KEY=your_key_here npm run dev
+AIRLABS_API_KEY=your_key_here
 ```
 Without it, manual airport entry still works; the lookup section is simply hidden.
 
@@ -83,7 +83,7 @@ npm run test:watch # watch mode
 4) The server also returns the sunset and golden‑hour times (and whether it scored tonight or tomorrow); the client renders them.
 
 #### Flight mode
-1) User switches to the "Flight" tab and enters departure/arrival airports (search by IATA code or city name) plus date and times. Optionally, a flight number can be looked up to auto‑fill these fields.
+1) User switches to the "Flight" tab and finds the flight by **number + date** (one match predicts straight away) or **route + date** (pick from that day's flights). Times come from the airline timetable; "Enter times" is the manual fallback.
 2) The app POSTs `{ depIata, arrIata, depTime, arrTime }` to `/api/predict-flight`.
 3) The server:
    - Looks up airports from a static database of 5,469 worldwide airports
@@ -198,8 +198,8 @@ Response (shape abbreviated):
 #### Airport Search
 `GET /api/airports?q=munich` → up to 8 airports (exact IATA match, then IATA prefix, then city/name substring). Runs server‑side so the airport dataset isn't shipped to the browser.
 
-#### Flight Lookup (optional)
-`GET /api/flight-lookup?flight=AA1004&date=2026-04-15` → AviationStack proxy (requires `AVIATIONSTACK_API_KEY` env var; returns 501 when not configured). Results are cached in memory for 6 h ("not found" for 1 h) to save the API's monthly quota.
+#### Flight Schedules (optional)
+`GET /api/flight-schedules?flight=UA2410&date=2026-10-07` or `?from=IAD&to=SLC&date=2026-10-07` → flights from the AirLabs timetable (`/v9/routes`) that operate on that weekday, with local departure/arrival times, duration and codeshares (folded into the operating flight). Requires `AIRLABS_API_KEY` (501 otherwise); results are cached for 24 h per query, so a search costs at most one AirLabs request a day.
 
 ### Frontend components
 - `src/lib/components/LocationInput.svelte`
@@ -215,8 +215,8 @@ Response (shape abbreviated):
 
 - `src/lib/components/FlightInput.svelte`
   - Airport search across 5,469 airports (IATA prefix match + city/name substring)
-  - Optional flight number lookup (shown when the server has an AviationStack key)
-  - Date, departure time, and arrival time fields with next‑day handling
+  - Tabs: Flight number, Route (list of that day's flights) and Enter times (manual fallback); the search tabs need `AIRLABS_API_KEY`
+  - Manual tab: date, departure and arrival times, with next‑day handling on the server
   - Keyboard navigation and validation
 
 - `src/lib/components/FlightResultsDisplay.svelte`
@@ -279,7 +279,7 @@ src/
       predict/+server.ts           # location prediction endpoint
       airports/+server.ts          # airport search
       predict-flight/+server.ts    # flight prediction endpoint
-      flight-lookup/+server.ts     # AviationStack proxy (optional)
+      flight-schedules/+server.ts  # AirLabs timetable search (optional)
       geocode/+server.ts           # city → coords proxy
       push/{subscribe,unsubscribe} # store/remove push subscriptions
       ratings/+server.ts           # store "How was it?" ratings

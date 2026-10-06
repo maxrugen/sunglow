@@ -194,7 +194,8 @@
         flightPrediction = null;
         statusMessage = '';
         resetScoreTheme();
-        focusById('dep-input');
+        // Whichever field the active search tab shows.
+        tick().then(() => (document.getElementById('flight-code') ?? document.getElementById('dep-input'))?.focus());
     }
 </script>
 

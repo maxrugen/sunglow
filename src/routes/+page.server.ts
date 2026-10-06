@@ -13,8 +13,8 @@ export const load: PageServerLoad = async ({ url }) => {
   const label = cleanLabel(url.searchParams.get('label')) ?? '';
   const eventParam = url.searchParams.get('event');
   const event: SkyEvent | undefined = eventParam === 'sunrise' || eventParam === 'sunset' ? eventParam : undefined;
-  // Lets the flight form show the lookup without probing (and spending quota on) the API.
-  const flightLookupAvailable = Boolean(env.AVIATIONSTACK_API_KEY);
+  // Lets the flight form offer flight-number/route search without probing (and spending quota on) the API.
+  const flightLookupAvailable = Boolean(env.AIRLABS_API_KEY);
 
   const coords = parseLatLon(url.searchParams.get('lat'), url.searchParams.get('lon'));
   if (!coords) return { flightLookupAvailable, event };
