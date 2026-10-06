@@ -45,7 +45,7 @@ function getCacheKey(lat: number, lon: number, event: SkyEvent, eventEpochSec: n
     eventEpochSec != null
       ? `h:${Math.floor(eventEpochSec / 3600)}`
       : `d:${new Date().toISOString().slice(0, 10)}`;
-  return `${lat.toFixed(3)},${lon.toFixed(3)},${event},${bucket}`;
+  return `${lat.toFixed(2)},${lon.toFixed(2)},${event},${bucket}`;
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -64,6 +64,11 @@ const POLAR_FALLBACK_HOUR: Record<SkyEvent, number> = { sunset: 18, sunrise: 6 }
 
 function validDate(d: unknown): Date | null {
   return d instanceof Date && !isNaN(d.getTime()) ? d : null;
+}
+
+/** Two decimals (~1.1 km), the resolution predictions are computed and cached at. */
+export function roundCoord(value: number): number {
+  return Math.round(value * 100) / 100;
 }
 
 function localDateKey(d: Date, timeZone: string): string {
@@ -110,14 +115,18 @@ export class PredictionError extends Error {
  * deep-link load and the notification cron.
  */
 export async function predictEvent({
-  latitude,
-  longitude,
+  latitude: rawLatitude,
+  longitude: rawLongitude,
   event,
 }: {
   latitude: number;
   longitude: number;
   event: SkyEvent;
 }): Promise<PredictionPayload> {
+  // ~1 km grid: forecasts are coarser than that, and neighbouring requests
+  // (e.g. someone stepping through coordinates) then share cache entries.
+  const latitude = roundCoord(rawLatitude);
+  const longitude = roundCoord(rawLongitude);
   const upcoming = nextEvent(new Date(), latitude, longitude, event);
   const eventSec = upcoming.time ? Math.floor(upcoming.time.getTime() / 1000) : null;
 

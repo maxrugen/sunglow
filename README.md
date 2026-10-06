@@ -13,7 +13,7 @@ Sunset and sunrise quality prediction web app built with SvelteKit and TypeScrip
 - Uses the actual sunrise/sunset time (SunCalc) to pick the forecast hour; once today's event has passed (+30 min for sunset, +15 min for sunrise) it switches to tomorrow's
 - **Sunset alerts**: opt‑in Web Push notification ~2 hours before a great sunset at your saved location
 - Serverless API using Open‑Meteo (hourly weather + air quality for aerosols/PM2.5)
-- In‑memory caching keyed by (lat, lon, sunset hour)
+- In‑memory caching keyed by (lat, lon rounded to ~1 km, event, event hour)
 - Robust fetches with short timeouts and retries
 - Accessible, keyboard‑friendly search with debounced queries and aria‑live announcements
 - Dynamic theming based on score using CSS custom properties
@@ -146,7 +146,7 @@ Response (shape abbreviated):
 
 Notes:
 - Uses `timeformat=unixtime`; these timestamps are UTC epochs, so the hour nearest the UTC sunset instant is selected.
-- Caches responses in memory (`Map`) with TTL, checked before any upstream fetch. Cache key: `(lat,lon,sunset hour)`.
+- Coordinates are rounded to 2 decimals (~1 km) before predicting, so nearby requests share work. Responses are cached in memory (10 min, size-capped), checked before any upstream fetch. Cache key: `(lat, lon, event, event hour)`.
 - Adds `Cache-Control: public, max-age=120` to responses.
 - Retries external fetches with short timeouts (server errors and rate limits only).
 
@@ -200,7 +200,7 @@ Response (shape abbreviated):
 `GET /api/airports?q=munich` → up to 8 airports (exact IATA match, then IATA prefix, then city/name substring). Runs server‑side so the airport dataset isn't shipped to the browser.
 
 #### Flight Lookup (optional)
-`GET /api/flight-lookup?flight=AA1004&date=2026-04-15` → AviationStack proxy (requires `AVIATIONSTACK_API_KEY` env var; returns 501 when not configured)
+`GET /api/flight-lookup?flight=AA1004&date=2026-04-15` → AviationStack proxy (requires `AVIATIONSTACK_API_KEY` env var; returns 501 when not configured). Results are cached in memory for 6 h ("not found" for 1 h) to save the API's monthly quota.
 
 ### Frontend components
 - `src/lib/components/LocationInput.svelte`
@@ -238,7 +238,7 @@ Response (shape abbreviated):
 - aria‑live announcements for result counts and loading/errors
 
 ### Performance & robustness
-- In‑memory caching by (lat, lon, sunset hour) with short TTL, checked before upstream calls
+- In‑memory caching by (lat, lon, event, event hour) with short TTL, checked before upstream calls; flight lookups cached for hours
 - Short timeouts; retries only for server errors and rate limits
 - Airport data and SunCalc stay on the server, keeping the client bundle small
 - Service worker (`src/service-worker.ts`) caches each build's assets and refreshes on deploy

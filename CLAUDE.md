@@ -28,7 +28,7 @@ Sunglow is a SvelteKit app (Svelte 5, runes) that predicts sunset and sunrise qu
    - Fetches the hourly forecast and air quality (AOD, PM2.5) via `src/lib/server/weather.ts`, plus cloud cover 50/150/300 km toward the sun at the event via `src/lib/server/horizon.ts` (one multi-point request), all in parallel.
    - Selects the hour nearest the event, builds a weighted composite, scores it with `evaluate()` (same model for both events).
    - Returns `event`, score, confidence, factor details, `day`, and `timings.eventEpochSec` / `goldenHourEpochSec` (golden hour start for sunset, end for sunrise).
-   - Cached in memory by (rounded lat/lon, event, event hour), checked before any upstream call.
+   - Coordinates are rounded to 2 decimals (`roundCoord()`) first; results are cached in memory by (lat/lon, event, event hour), checked before any upstream call.
 3. Deep links `/?lat=&lon=&label=&event=` are rendered by `+page.server.ts`, which calls `predictEvent()` directly.
 4. User-facing per-event wording lives in `src/lib/events.ts` (`EVENT_COPY`); don't hard-code "sunset" in components.
 
