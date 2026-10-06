@@ -101,7 +101,7 @@ Core logic lives in:
 - `WeatherData` type describes inputs (cloud layers, humidity, AOD, PM2.5, visibility, wind, pressure trend, dewpoint spread, solar altitude, etc.)
 - `calculateWithDetails(weatherData)` computes:
   - High/mid cloud bonuses (peak bands)
-  - Low cloud multiplicative penalties (gates near the horizon)
+  - Low cloud multiplicative gate: scales the cloud score and all bonuses (no bonus can add color if the sun is blocked); penalties apply in full
   - Humidity/visibility/haze dampening
   - Precipitation penalties
   - Aerosol/PM2.5 bonus within sensible humidity/visibility ranges

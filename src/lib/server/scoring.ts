@@ -135,12 +135,15 @@ export function calculateWithDetails(weatherData: WeatherData): {
   const beforeLow = score;
   score *= lowMultiplier;
   const lowEffect = score - beforeLow;
+  // Bonuses only matter if sunlight gets through, so the same gate scales them.
+  // Penalties stay whole: they describe conditions that hurt regardless.
+  const gate = (adj: number) => (adj > 0 ? adj * lowMultiplier : adj);
 
   const humidityPenalty = excessPenalty(humidity, 75, 0.5);
   score -= humidityPenalty;
 
   const allowed = aerosolAllowed(humidity, visibilityM);
-  const aodAdj = aodBonus(aod, allowed);
+  const aodAdj = gate(aodBonus(aod, allowed));
   score += aodAdj;
 
   const precipProbPenalty =
@@ -159,6 +162,7 @@ export function calculateWithDetails(weatherData: WeatherData): {
     else if (dewPointSpreadC < 5) dewSpreadAdj = -4;
     else if (dewPointSpreadC > 8) dewSpreadAdj = +2;
   }
+  dewSpreadAdj = gate(dewSpreadAdj);
   score += dewSpreadAdj;
 
   let windAdj = 0;
@@ -167,9 +171,10 @@ export function calculateWithDetails(weatherData: WeatherData): {
     else if (windSpeed10mMs <= 6) windAdj = +3;
     else if (windSpeed10mMs > 10) windAdj = -4;
   }
+  windAdj = gate(windAdj);
   score += windAdj;
 
-  const pressure = pressureAdj(pressureTrendHpa);
+  const pressure = gate(pressureAdj(pressureTrendHpa));
   score += pressure;
 
   let pm25Adj = 0;
@@ -178,15 +183,16 @@ export function calculateWithDetails(weatherData: WeatherData): {
     if (pm25UgM3 >= 10 && pm25UgM3 <= 35 && allowed) pm25Adj = +4;
     else if (pm25UgM3 > 60) pm25Adj = -8;
   }
+  pm25Adj = gate(pm25Adj);
   score += pm25Adj;
 
-  const solarAdj = solarAltitudeAdj(solarAltitudeDeg);
+  const solarAdj = gate(solarAltitudeAdj(solarAltitudeDeg));
   score += solarAdj;
 
   const totalCloudAdj = typeof totalCloud === 'number' && totalCloud > 90 ? -5 : 0;
   score += totalCloudAdj;
 
-  const horizon = horizonAdj(horizonCloud);
+  const horizon = gate(horizonAdj(horizonCloud));
   score += horizon;
 
   return {
@@ -196,16 +202,16 @@ export function calculateWithDetails(weatherData: WeatherData): {
       midCloud: { value: midCloud, net: Math.round(netMid) },
       lowCloud: { value: lowCloud, multiplier: Number(lowMultiplier.toFixed(2)), effect: Math.round(lowEffect), heavyOvercast },
       humidity: { value: humidity, penalty: Math.round(-humidityPenalty) },
-      aod: { value: aod, bonus: aodAdj },
+      aod: { value: aod, bonus: Math.round(aodAdj) },
       precipitation: { probability: precipitationProbability, rateMmH: precipitationMmPerHour, penaltyProb: Math.round(-precipProbPenalty), penaltyRate: Math.round(-precipPenalty) },
       visibility: { meters: visibilityM, penalty: Math.round(-visPenalty) },
-      dewSpread: { celsius: dewPointSpreadC, net: dewSpreadAdj },
-      wind: { speedMs: windSpeed10mMs, net: windAdj },
-      pressureTrend: { hPa: pressureTrendHpa, net: pressure },
+      dewSpread: { celsius: dewPointSpreadC, net: Math.round(dewSpreadAdj) },
+      wind: { speedMs: windSpeed10mMs, net: Math.round(windAdj) },
+      pressureTrend: { hPa: pressureTrendHpa, net: Math.round(pressure) },
       totalCloud: { value: totalCloud, net: totalCloudAdj },
-      pm25: { ugm3: pm25UgM3, net: pm25Adj },
-      solarAltitude: { deg: solarAltitudeDeg, net: solarAdj },
-      horizon: { blockingPct: horizonCloud, net: horizon }
+      pm25: { ugm3: pm25UgM3, net: Math.round(pm25Adj) },
+      solarAltitude: { deg: solarAltitudeDeg, net: Math.round(solarAdj) },
+      horizon: { blockingPct: horizonCloud, net: Math.round(horizon) }
     }
   };
 }
