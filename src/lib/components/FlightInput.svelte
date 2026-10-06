@@ -54,6 +54,8 @@
     let isSearching: boolean = $state(false);
     let schedules: ScheduledFlight[] = $state([]);
     let searchMessage: string = $state('');
+    /** AirLabs returned only part of a busy route's timetable. */
+    let incomplete: boolean = $state(false);
     let errorMessage: string = $state('');
 
     const airportLabel = (a: Airport) => `${a.iata} – ${a.name}`;
@@ -118,6 +120,7 @@
         mode = next;
         errorMessage = '';
         searchMessage = '';
+        incomplete = false;
         schedules = [];
     }
 
@@ -130,6 +133,7 @@
         e.preventDefault();
         errorMessage = '';
         searchMessage = '';
+        incomplete = false;
         schedules = [];
 
         // eslint-disable-next-line svelte/prefer-svelte-reactivity -- local request params, not state
@@ -153,6 +157,7 @@
             if (!res.ok) { errorMessage = data.error || 'Flight search failed. Try again, or enter the times.'; return; }
             schedules = data.flights ?? [];
             searchMessage = data.message ?? '';
+            incomplete = data.incomplete === true;
             // A flight number usually means one flight: go straight to the prediction.
             if (mode === 'number' && schedules.length === 1) {
                 const f = schedules[0];
@@ -254,7 +259,7 @@
                 <div class="row">
                     <div class="field grow">
                         <label class="field-label" for="flight-code">Flight number</label>
-                        <input id="flight-code" type="text" placeholder="e.g. UA2410" bind:value={flightCode} maxlength="8" autocomplete="off" />
+                        <input id="flight-code" type="text" placeholder="e.g. UA2410 or UAL2410" bind:value={flightCode} maxlength="10" autocomplete="off" />
                     </div>
                     {@render dateField()}
                 </div>
@@ -270,7 +275,7 @@
 
         {#if schedules.length > 0}
             <div class="schedules">
-                <p class="hint">{schedules.length === 1 ? '1 flight' : `${schedules.length} flights`} on this day. Pick yours:</p>
+                <p class="hint">{schedules.length === 1 ? '1 flight' : `${schedules.length} flights`} on this day{incomplete ? ' (not a complete list, see below)' : ''}. Pick yours:</p>
                 <ul>
                     {#each schedules as f (f.flightIata + f.depTime)}
                         <li>

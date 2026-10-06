@@ -1,5 +1,6 @@
 import * as env from '$app/env/private';
 import { BoundedCache } from '#lib/server/bounded-cache.js';
+import type { FlightNumber } from '#lib/flight-number.js';
 
 /**
  * Flight timetables from AirLabs' routes database: which flights run on a
@@ -23,6 +24,8 @@ export type ScheduledFlight = {
   days: Weekday[];
   /** Marketing flight numbers sold on the same flight, e.g. ["LH8936"]. */
   codeshares: string[];
+  /** When AirLabs last saw this timetable entry (ISO), to prefer current entries over stale ones. */
+  updated?: string;
 };
 
 type RouteRow = {
@@ -35,6 +38,7 @@ type RouteRow = {
   arr_time?: string | null;
   duration?: number | null;
   days?: string[] | null;
+  updated?: string | null;
 };
 
 const WEEKDAYS: Weekday[] = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
@@ -81,6 +85,7 @@ export function toScheduledFlights(rows: RouteRow[]): ScheduledFlight[] {
       durationMin: r.duration ?? undefined,
       days,
       codeshares: [],
+      updated: r.updated ?? undefined,
     };
     flights.set(key, flight);
     return flight;
@@ -100,20 +105,49 @@ export function operatesOn(flight: ScheduledFlight, date: string): boolean {
   return flight.days.length === 0 || flight.days.includes(weekdayOf(date));
 }
 
-export type RouteQuery = { flight: string } | { from: string; to: string };
+/**
+ * The flights operating on `date`, one entry per flight number. A flight
+ * number can have several timetable entries (DL1915: 16:40 Tue/Wed, 19:00
+ * Mon/Thu/Fri/Sun, 19:05 Sat). They normally cover different weekdays, but
+ * after a schedule change an old entry can overlap the new one; then the most
+ * recently updated entry wins.
+ */
+export function flightsOn(flights: ScheduledFlight[], date: string): ScheduledFlight[] {
+  const best = new Map<string, ScheduledFlight>();
+  for (const f of flights) {
+    if (!operatesOn(f, date)) continue;
+    const current = best.get(f.flightIata);
+    if (!current || (f.updated ?? '') > (current.updated ?? '')) best.set(f.flightIata, f);
+  }
+  return flights.filter((f) => best.get(f.flightIata) === f);
+}
+
+export type RouteQuery = { flight: FlightNumber } | { from: string; to: string };
+
+export type Schedules = {
+  flights: ScheduledFlight[];
+  /**
+   * AirLabs returned only part of the timetable. Free keys get the first 50
+   * rows and can't page further (`offset` returns nothing), and codeshares
+   * count as rows, so busy routes (JFK→LAX: ~400 rows) come back cut short.
+   */
+  incomplete: boolean;
+};
 
 /** Timetables change rarely; caching protects the monthly request quota. */
-const cache = new BoundedCache<ScheduledFlight[]>(24 * 3600 * 1000, 300);
+const cache = new BoundedCache<Schedules>(24 * 3600 * 1000, 300);
 
 /**
  * Timetable entries for a flight number or a route, or null if AirLabs is
  * unavailable. One request per query and day (cached).
  */
-export async function fetchSchedules(query: RouteQuery): Promise<ScheduledFlight[] | null> {
+export async function fetchSchedules(query: RouteQuery): Promise<Schedules | null> {
   const key = env.AIRLABS_API_KEY;
   if (!key) return null;
   const params = new URLSearchParams(
-    'flight' in query ? { flight_iata: query.flight } : { dep_iata: query.from, arr_iata: query.to }
+    'flight' in query
+      ? { [query.flight.system === 'icao' ? 'flight_icao' : 'flight_iata']: query.flight.code }
+      : { dep_iata: query.from, arr_iata: query.to }
   );
   const cacheKey = params.toString();
   const cached = cache.get(cacheKey);
@@ -124,15 +158,17 @@ export async function fetchSchedules(query: RouteQuery): Promise<ScheduledFlight
     const res = await fetch(`https://airlabs.co/api/v9/routes?${params.toString()}`, {
       signal: AbortSignal.timeout(10000),
     });
-    const body = (await res.json().catch(() => null)) as { response?: RouteRow[]; error?: unknown } | null;
+    const body = (await res.json().catch(() => null)) as
+      | { response?: RouteRow[]; error?: unknown; request?: { has_more?: boolean } }
+      | null;
     if (!res.ok || !body || body.error || !Array.isArray(body.response)) {
       // Log the error code/message only; the request URL contains the key.
       console.error('[airlabs] routes failed', res.status, JSON.stringify(body?.error ?? null).slice(0, 200));
       return null;
     }
-    const flights = toScheduledFlights(body.response);
-    cache.set(cacheKey, flights);
-    return flights;
+    const schedules = { flights: toScheduledFlights(body.response), incomplete: body.request?.has_more === true };
+    cache.set(cacheKey, schedules);
+    return schedules;
   } catch (err) {
     console.error('[airlabs] routes request failed', (err as Error).name);
     return null;
