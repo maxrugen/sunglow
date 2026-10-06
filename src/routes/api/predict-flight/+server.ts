@@ -151,7 +151,9 @@ export const POST: RequestHandler = async ({ request }) => {
     }
 
     // Check cache
-    const cacheKey = `${depIata}-${arrIata}-${Math.floor(depTimeMs / 3600000)}-${Math.floor(arrTimeMs / 3600000)}`;
+    // Exact times: the response echoes them and sightings depend on them, so
+    // rounding (e.g. to the hour) would serve another flight's answer.
+    const cacheKey = `${depIata}-${arrIata}-${depTimeMs}-${arrTimeMs}`;
     const cached = cache.get(cacheKey);
     if (cached && Date.now() - cached.ts < CACHE_TTL_MS) {
       return json(cached.payload, { headers: { 'Cache-Control': 'public, max-age=120' } });
