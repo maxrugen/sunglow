@@ -36,13 +36,14 @@ export const POST: RequestHandler = async ({ request }) => {
   if (!coords) {
     return json({ error: 'invalid or missing latitude/longitude' }, { status: 400 });
   }
-  const { latitude, longitude } = coords;
+  // ~100 m is plenty for a forecast; no need to keep anyone's exact position.
+  const latitude = Math.round(coords.latitude * 1000) / 1000;
+  const longitude = Math.round(coords.longitude * 1000) / 1000;
   const events = parseAlertEvents(body?.events);
   if (!events) {
     return json({ error: 'events must enable sunset and/or sunrise' }, { status: 400 });
   }
 
-  const userAgent = request.headers.get('user-agent');
   const [existing] = await db
     .select({ latitude: pushSubscriptions.latitude, longitude: pushSubscriptions.longitude })
     .from(pushSubscriptions)
@@ -55,10 +56,11 @@ export const POST: RequestHandler = async ({ request }) => {
 
   await db
     .insert(pushSubscriptions)
-    .values({ endpoint, p256dh, auth, latitude, longitude, label, userAgent, ...events })
+    .values({ endpoint, p256dh, auth, latitude, longitude, label, ...events })
     .onConflictDoUpdate({
       target: pushSubscriptions.endpoint,
-      set: { p256dh, auth, latitude, longitude, label, userAgent, ...events, ...resetDedup },
+      // userAgent is no longer collected; clear any value stored by older versions.
+      set: { p256dh, auth, latitude, longitude, label, userAgent: null, ...events, ...resetDedup },
     });
 
   return json({ ok: true });

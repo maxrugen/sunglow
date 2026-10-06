@@ -76,7 +76,8 @@ sw.addEventListener('push', (event) => {
     sw.registration.showNotification(data.title || 'Sunglow', {
       body: data.body || '',
       icon: '/icon-192.png',
-      badge: '/icon-192.png',
+      // Android tints the badge, so it must be a monochrome silhouette.
+      badge: '/badge-96.png',
       tag: data.tag || 'sunglow',
       // `renotify` is missing from TS's NotificationOptions but supported by browsers.
       ...({ renotify: true } as NotificationOptions),

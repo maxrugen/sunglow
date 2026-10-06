@@ -59,7 +59,7 @@
                 <small>We predicted {pending.predictedScore}%.</small>
             </p>
             <div class="choices" role="group" aria-label={`Rate the ${pending.event}`}>
-                {#each CHOICES as choice}
+                {#each CHOICES as choice (choice.value)}
                     <button
                         type="button"
                         class="choice"

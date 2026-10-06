@@ -70,14 +70,22 @@ function cssVariables(theme: Theme): Record<string, string> {
   };
 }
 
+/** Browser/OS chrome (address bar, PWA title bar) follows the top of the gradient. */
+function setThemeColor(color: string) {
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', color);
+}
+
 /** Apply the page theme (CSS custom properties) for a score. */
 export function applyScoreTheme(score: number, root: HTMLElement = document.documentElement) {
-  for (const [prop, value] of Object.entries(cssVariables(THEMES[scoreLabel(Number(score) || 0)]))) {
+  const theme = THEMES[scoreLabel(Number(score) || 0)];
+  for (const [prop, value] of Object.entries(cssVariables(theme))) {
     root.style.setProperty(prop, value);
   }
+  setThemeColor(theme.backgroundStart);
 }
 
 /** Back to the neutral theme in app.css (e.g. when starting a new search). */
 export function resetScoreTheme(root: HTMLElement = document.documentElement) {
   for (const prop of Object.keys(cssVariables(THEMES.Poor))) root.style.removeProperty(prop);
+  setThemeColor(THEMES.Poor.backgroundStart);
 }

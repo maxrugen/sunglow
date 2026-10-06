@@ -73,6 +73,13 @@ describe('POST /api/push/subscribe', () => {
     expect((upsert!.values.label as string).length).toBe(80);
   });
 
+  it('stores coordinates rounded to ~100 m and no user agent', async () => {
+    await call({ ...base, latitude: 52.520083, longitude: 13.404954 });
+    expect(upsert!.values).toMatchObject({ latitude: 52.52, longitude: 13.405 });
+    expect(upsert!.values).not.toHaveProperty('userAgent');
+    expect(upsert!.set.userAgent).toBeNull();
+  });
+
   it('rejects turning every event off', async () => {
     expect((await call({ ...base, events: { sunset: false, sunrise: false } })).status).toBe(400);
     expect(upsert).toBeNull();

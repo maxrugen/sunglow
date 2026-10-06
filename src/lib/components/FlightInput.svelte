@@ -35,11 +35,9 @@
         { id: 'route', label: 'Route' },
         { id: 'manual', label: 'Enter times' },
     ];
-    let mode: SearchMode = $state('manual');
-    $effect(() => {
-        // Searching needs the server's timetable API; without it only manual entry works.
-        mode = lookupAvailable ? 'number' : 'manual';
-    });
+    // Searching needs the server's timetable API; without it only manual entry works.
+    // Writable: the tabs override it.
+    let mode: SearchMode = $derived(lookupAvailable ? 'number' : 'manual');
 
     // Shared between the tabs, so switching keeps what was entered.
     let flightCode: string = $state('');
@@ -63,6 +61,8 @@
     const duration = (min?: number) => (min ? `${Math.floor(min / 60)}h ${String(min % 60).padStart(2, '0')}m` : '');
 
     // Airport search runs on the server so the dataset stays out of the bundle.
+    // A plain cache, not reactive state.
+    // eslint-disable-next-line svelte/prefer-svelte-reactivity
     const searchCache = new Map<string, Airport[]>();
     async function searchAirport(query: string): Promise<Airport[]> {
         const q = query.trim().toUpperCase();
@@ -132,6 +132,7 @@
         searchMessage = '';
         schedules = [];
 
+        // eslint-disable-next-line svelte/prefer-svelte-reactivity -- local request params, not state
         const params = new URLSearchParams({ date: dateStr });
         if (mode === 'number') {
             const code = flightCode.trim().toUpperCase().replace(/\s+/g, '');
@@ -221,7 +222,7 @@
 <div class="flight-input">
     {#if lookupAvailable}
         <div class="segmented" role="group" aria-label="How to find your flight">
-            {#each MODES as m}
+            {#each MODES as m (m.id)}
                 <button type="button" class:active={mode === m.id} aria-pressed={mode === m.id} onclick={() => switchTo(m.id)}>
                     {m.label}
                 </button>

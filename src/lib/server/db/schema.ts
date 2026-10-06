@@ -29,6 +29,7 @@ export const pushSubscriptions = pgTable(
     latitude: doublePrecision('latitude').notNull(),
     longitude: doublePrecision('longitude').notNull(),
     label: text('label'),
+    /** No longer collected (privacy); kept so older rows stay readable. Cleared on re-subscribe. */
     userAgent: text('user_agent'),
     alertSunset: boolean('alert_sunset').notNull().default(true),
     alertSunrise: boolean('alert_sunrise').notNull().default(false),
