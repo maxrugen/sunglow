@@ -10,20 +10,22 @@ Sunset Quality Prediction web app built with SvelteKit and TypeScript. It estima
 - Great‑circle route interpolation with sunset window detection along the flight path
 - Seat side recommendation based on sun azimuth vs. plane heading
 - Adapted in‑flight scoring model (cloud‑top views as bonus, reduced surface penalties)
-- Uses actual sunset time (SunCalc) to pick the forecast hour
+- Uses actual sunset time (SunCalc) to pick the forecast hour; after tonight's sunset it switches to tomorrow's
+- **Sunset alerts**: opt‑in Web Push notification ~2 hours before a great sunset at your saved location
 - Serverless API using Open‑Meteo (hourly weather + air quality for aerosols/PM2.5)
-- In‑memory caching keyed by (lat, lon, date, hour)
+- In‑memory caching keyed by (lat, lon, sunset hour)
 - Robust fetches with short timeouts and retries
 - Accessible, keyboard‑friendly search with debounced queries and aria‑live announcements
 - Dynamic theming based on score using CSS custom properties
-- TypeScript across routes and components; shared types
+- TypeScript across routes and components (Svelte 5 runes); shared types
 
 ### Tech stack
-- SvelteKit + Vite
+- SvelteKit (Svelte 5) + Vite, deployed on Vercel
 - TypeScript
 - SunCalc
 - Open‑Meteo (Weather + Geocoding) and BigDataCloud (fallback reverse geocode)
 - Plain CSS with CSS Custom Properties
+- Neon Postgres + Drizzle (push subscriptions), Web Push (VAPID)
 
 ---
 
@@ -78,7 +80,7 @@ npm run test:watch # watch mode
    - Picks the hour closest to the actual sunset (all timestamps are UTC epochs)
    - Computes score and confidence using `evaluate` in `src/lib/server/scoring.ts`
    - Caches the response in memory keyed by `(lat,lon,date,hour)`
-4) The client computes sunset/golden‑hour times with SunCalc and renders results.
+4) The server also returns the sunset and golden‑hour times (and whether it scored tonight or tomorrow); the client renders them.
 
 #### Flight mode
 1) User switches to the "Flight" tab and enters departure/arrival airports (search by IATA code or city name) plus date and times. Optionally, a flight number can be looked up to auto‑fill these fields.
@@ -129,6 +131,8 @@ Response (shape abbreviated):
   "qualityScore": 0-100,
   "confidence": 0-100,
   "explanation": { "factors": { /* human-readable factor details */ } },
+  "day": "today", // or "tomorrow" once tonight's sunset has passed
+  "timings": { "sunsetEpochSec": 1730003000, "goldenHourEpochSec": 1730000400 },
   "used": {
     "epochSec": 1730000000, // UTC epoch of the scored hour
     "latitude": 52.52,
@@ -194,11 +198,11 @@ If no sunset occurs during the flight, returns `sunsetDuringFlight: false` with 
 - `src/lib/components/LocationInput.svelte`
   - Debounced search, keyboard navigation (ArrowUp/Down, Enter), Esc/Click outside to close
   - Announces result count via aria‑live
-  - Emits `locationSuccess` and `locationError`
+  - Calls the `onLocationSuccess` / `onLocationError` callback props
 
 - `src/lib/components/ResultsDisplay.svelte`
   - Shows score, qualitative label (Great/Good/Fair/Poor), confidence
-  - Shows sunset and golden hour times (client‑side via SunCalc)
+  - Shows sunset and golden hour times from the server response, and notes when the forecast is for tomorrow
   - Renders a concise, natural‑language explanation
   - Footer shows used local hour, solar altitude, and coordinates
 
@@ -226,9 +230,10 @@ If no sunset occurs during the flight, returns `sunsetDuringFlight: false` with 
 - aria‑live announcements for result counts and loading/errors
 
 ### Performance & robustness
-- In‑memory caching by (lat, lon, date, hour) with short TTL
-- Short timeouts and basic retry for external fetches
-- Dynamic import of SunCalc on demand
+- In‑memory caching by (lat, lon, sunset hour) with short TTL, checked before upstream calls
+- Short timeouts; retries only for server errors and rate limits
+- Airport data and SunCalc stay on the server, keeping the client bundle small
+- Service worker (`src/service-worker.ts`) caches each build's assets and refreshes on deploy
 - Response includes `used` time/coords for transparency
 
 ---
@@ -242,6 +247,7 @@ src/
       ResultsDisplay.svelte        # location sunset results
       FlightInput.svelte           # airport search + flight form
       FlightResultsDisplay.svelte  # flight sunset results
+      PushSubscribeButton.svelte   # opt-in sunset alerts
     data/
       airports.json                # 5,469 airports (OurAirports)
     server/
@@ -250,20 +256,36 @@ src/
       prediction.ts                # location prediction (shared by API, deep links, cron)
       airports.ts                  # airport lookup + search
       flight-route.ts              # great-circle interpolation, sunset windows, seat side
-      flight-route.test.ts         # 25 unit tests
-      scoring.test.ts              # 30 unit tests
+      flight-time.ts               # airport-local times -> UTC
+      webpush.ts, push-auth.ts     # Web Push sending + subscribe gate
+      db/                          # Drizzle schema + Neon client
+      *.test.ts                    # vitest unit tests
+    score.ts                       # score labels + page theme
+    http.ts                        # error message helper
     types.ts                       # client/shared types
+  service-worker.ts                # asset cache + push handlers
   routes/
     +page.svelte                   # main UI (location + flight modes)
     +page.server.ts                # SSR prefetch (lat/lon/label via query)
     api/
-      predict/+server.js           # location prediction endpoint
+      predict/+server.ts           # location prediction endpoint
       airports/+server.ts          # airport search
       predict-flight/+server.ts    # flight prediction endpoint
       flight-lookup/+server.ts     # AviationStack proxy (optional)
       geocode/+server.ts           # city → coords proxy
       reverse-geocode/+server.ts   # coords → label proxy (+fallback)
+      push/{subscribe,unsubscribe} # store/remove push subscriptions
+      cron/+server.ts              # hourly sunset-alert job
 ```
+
+---
+
+## Sunset alerts (Web Push)
+Optional. Copy `.env.example` to `.env.local` and set `DATABASE_URL`, the VAPID keys and `CRON_SECRET`, then run `npm run db:push` once.
+
+- `/api/push/subscribe` stores the subscription with its location.
+- `/api/cron` (requires `Authorization: Bearer $CRON_SECRET`) checks subscribers whose sunset is 2–3 hours away and sends a notification when the score and confidence meet `SUNSET_SCORE_MIN` / `SUNSET_CONFIDENCE_MIN`. At most one alert per location per day.
+- Vercel Hobby crons only run daily, so `.github/workflows/cron.yml` calls the endpoint hourly. It needs the `APP_URL` and `CRON_SECRET` repository secrets.
 
 ---
 

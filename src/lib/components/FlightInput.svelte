@@ -1,12 +1,16 @@
 <script lang="ts">
-    import { createEventDispatcher } from 'svelte';
     import type { Airport } from '$lib/types';
 
-    /** Whether the server has an AviationStack key (decided in the page load). */
-    export let lookupAvailable: boolean = false;
     type FlightSubmitDetail = { depIata: string; arrIata: string; depTime: string; arrTime: string };
 
-    const dispatch = createEventDispatcher<{ flightSubmit: FlightSubmitDetail; flightError: { message: string }; switchMode: void }>();
+    interface Props {
+        /** Whether the server has an AviationStack key (decided in the page load). */
+        lookupAvailable?: boolean;
+        onFlightSubmit: (flight: FlightSubmitDetail) => void;
+        onSwitchMode: () => void;
+    }
+
+    let { lookupAvailable = false, onFlightSubmit, onSwitchMode }: Props = $props();
 
     /** Today's date in the browser's zone as YYYY-MM-DD (toISOString would give the UTC date). */
     function localDateString(d = new Date()): string {
@@ -14,30 +18,27 @@
     }
 
     // Flight number lookup state
-    let flightCode: string = '';
-    let flightDate: string = localDateString();
-    let isLookingUp: boolean = false;
+    let flightCode: string = $state('');
+    let flightDate: string = $state(localDateString());
+    let isLookingUp: boolean = $state(false);
 
     // Manual entry state
-    let depSearch: string = '';
-    let arrSearch: string = '';
-    let depResults: Airport[] = [];
-    let arrResults: Airport[] = [];
+    let depSearch: string = $state('');
+    let arrSearch: string = $state('');
+    let depResults: Airport[] = $state([]);
+    let arrResults: Airport[] = $state([]);
     let selectedDep: Airport | null = null;
     let selectedArr: Airport | null = null;
-    let depActiveIndex: number = -1;
-    let arrActiveIndex: number = -1;
-    let depTime: string = '';
-    let arrTime: string = '';
-    let errorMessage: string = '';
-    let isSubmitting: boolean = false;
-    let depInputEl: HTMLInputElement;
-    let arrInputEl: HTMLInputElement;
-    let depRootEl: HTMLDivElement;
-    let arrRootEl: HTMLDivElement;
+    let depActiveIndex: number = $state(-1);
+    let arrActiveIndex: number = $state(-1);
+    let depTime: string = $state('');
+    let arrTime: string = $state('');
+    let errorMessage: string = $state('');
+    let depRootEl: HTMLDivElement | undefined = $state();
+    let arrRootEl: HTMLDivElement | undefined = $state();
 
     // Default date: today
-    let dateStr: string = localDateString();
+    let dateStr: string = $state(localDateString());
 
     // Airport search runs on the server so the dataset stays out of the bundle.
     const searchCache = new Map<string, Airport[]>();
@@ -165,7 +166,7 @@
 
         // Wall-clock times without an offset: the server reads each one in its
         // airport's time zone and picks the arrival date (overnight, date line).
-        dispatch('flightSubmit', {
+        onFlightSubmit({
             depIata: selectedDep.iata,
             arrIata: selectedArr.iata,
             depTime: `${dateStr}T${depTime}:00`,
@@ -174,7 +175,7 @@
     }
 </script>
 
-<svelte:window on:click={onWindowClick} />
+<svelte:window onclick={onWindowClick} />
 <div class="flight-input">
     {#if lookupAvailable}
         <div class="lookup-section">
@@ -182,7 +183,7 @@
             <div class="lookup-row">
                 <input id="flight-code-input" type="text" placeholder="e.g. AA1004" bind:value={flightCode} maxlength="10" />
                 <input type="date" bind:value={flightDate} />
-                <button class="btn" on:click={lookupFlight} disabled={isLookingUp}>
+                <button class="btn" onclick={lookupFlight} disabled={isLookingUp}>
                     {isLookingUp ? 'Looking up…' : 'Look up'}
                 </button>
             </div>
@@ -198,16 +199,15 @@
                 type="text"
                 placeholder="Search city or IATA code"
                 bind:value={depSearch}
-                on:input={onDepInput}
-                on:keydown={onDepKeyDown}
-                bind:this={depInputEl}
+                oninput={onDepInput}
+                onkeydown={onDepKeyDown}
                 autocomplete="off"
             />
             {#if depResults.length > 0}
                 <ul class="results" role="listbox">
                     {#each depResults as r, i}
                         <li>
-                            <button type="button" class="result" class:active={i === depActiveIndex} role="option" aria-selected={i === depActiveIndex ? 'true' : 'false'} on:click={() => selectDep(r)}>
+                            <button type="button" class="result" class:active={i === depActiveIndex} role="option" aria-selected={i === depActiveIndex} onclick={() => selectDep(r)}>
                                 <span><strong>{r.iata}</strong> {r.name}</span>
                                 <small>{r.city}, {r.country}</small>
                             </button>
@@ -224,16 +224,15 @@
                 type="text"
                 placeholder="Search city or IATA code"
                 bind:value={arrSearch}
-                on:input={onArrInput}
-                on:keydown={onArrKeyDown}
-                bind:this={arrInputEl}
+                oninput={onArrInput}
+                onkeydown={onArrKeyDown}
                 autocomplete="off"
             />
             {#if arrResults.length > 0}
                 <ul class="results" role="listbox">
                     {#each arrResults as r, i}
                         <li>
-                            <button type="button" class="result" class:active={i === arrActiveIndex} role="option" aria-selected={i === arrActiveIndex ? 'true' : 'false'} on:click={() => selectArr(r)}>
+                            <button type="button" class="result" class:active={i === arrActiveIndex} role="option" aria-selected={i === arrActiveIndex} onclick={() => selectArr(r)}>
                                 <span><strong>{r.iata}</strong> {r.name}</span>
                                 <small>{r.city}, {r.country}</small>
                             </button>
@@ -265,10 +264,10 @@
     {/if}
 
     <div class="actions">
-        <button class="btn primary" on:click={submit} disabled={isSubmitting}>
-            {isSubmitting ? 'Predicting…' : 'Predict In-Flight Sunset'}
+        <button class="btn primary" onclick={submit}>
+            Predict In-Flight Sunset
         </button>
-        <button class="btn link" on:click={() => dispatch('switchMode')}>
+        <button class="btn link" onclick={onSwitchMode}>
             ← Back to location mode
         </button>
     </div>

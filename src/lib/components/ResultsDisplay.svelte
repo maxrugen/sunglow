@@ -1,16 +1,33 @@
 <script lang="ts">
     import type { ClientPrediction } from '$lib/types';
-    export let prediction: ClientPrediction | null;
-    export let locationLabel: string = '';
-    export let confidence: number | undefined = undefined;
+    import { scoreLabel } from '$lib/score';
 
-    $: score = Number(prediction?.qualityScore ?? 0);
-    $: description = score >= 80 ? 'Great' : score >= 65 ? 'Good' : score >= 40 ? 'Fair' : 'Poor';
+    interface Props {
+        prediction: ClientPrediction | null;
+        locationLabel?: string;
+    }
 
+    let { prediction, locationLabel = '' }: Props = $props();
+
+    let score = $derived(Number(prediction?.qualityScore ?? 0));
+    let description = $derived(scoreLabel(score));
+    let confidence = $derived(prediction?.confidence);
+    let isTomorrow = $derived(prediction?.day === 'tomorrow');
+
+    /**
+     * Wall-clock time at the forecast location (not the viewer's zone): shift by
+     * the location's UTC offset, then format as UTC.
+     */
     function formatTime(value: Date | number | null | undefined) {
-        if (!value) return '--';
+        if (value == null) return '--';
         const d = value instanceof Date ? value : new Date(value);
-        return new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(d);
+        if (isNaN(d.getTime())) return '--';
+        const offsetSec = prediction?.used?.utcOffsetSeconds;
+        if (offsetSec == null) {
+            return new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(d);
+        }
+        return new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit', timeZone: 'UTC' })
+            .format(new Date(d.getTime() + offsetSec * 1000));
     }
 
     function buildExplanation(p: any) {
@@ -77,11 +94,14 @@
 
 <section class="card">
     <h2>
-        Sunset Quality: <span class="accent">{score}%</span>
+        {isTomorrow ? "Tomorrow's Sunset" : 'Sunset Quality'}: <span class="accent">{score}%</span>
         <small class="badge">{description}</small>
     </h2>
     {#if locationLabel}
         <p class="location">{locationLabel}</p>
+    {/if}
+    {#if isTomorrow}
+        <p class="day-note">Tonight's sunset has passed, so this is the forecast for tomorrow.</p>
     {/if}
 
     <div class="metrics">
@@ -107,7 +127,7 @@
             <p>{buildExplanation(prediction)}</p>
             {#if prediction?.used}
                 <p class="used">
-                    Used time: {new Date((prediction.used.epochSec || 0) * 1000).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' })}
+                    Used time: {formatTime((prediction.used.epochSec || 0) * 1000)}
                     {#if (() => { const fx:any = prediction?.explanation?.factors as any; return typeof fx?.solarAltitude?.deg === 'number'; })()}
                         · Solar altitude: {(() => { const fx:any = prediction?.explanation?.factors as any; return Math.round(fx.solarAltitude.deg); })()}°
                     {:else}
@@ -138,6 +158,7 @@
     .metrics { display: grid; gap: 0.75rem; }
     .row { display: flex; align-items: center; justify-content: space-between; }
     .location { margin: 0 0 0.5rem; opacity: 0.9; font-weight: 700; }
+    .day-note { margin: 0 0 0.5rem; font-size: 0.85rem; opacity: 0.8; }
     .row strong { font-weight: 600; }
     .explain { margin-top: 1rem; opacity: 0.95; }
     .explain h3 { margin: 0 0 0.5rem; font-size: 1rem; }

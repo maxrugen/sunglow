@@ -4,25 +4,35 @@
     import PushSubscribeButton from '$lib/components/PushSubscribeButton.svelte';
     import FlightInput from '$lib/components/FlightInput.svelte';
     import FlightResultsDisplay from '$lib/components/FlightResultsDisplay.svelte';
-    import { onMount } from 'svelte';
-    import type { ClientPrediction, FlightPredictionResponse } from '$lib/types';
+    import { onMount, untrack } from 'svelte';
+    import { applyScoreTheme } from '$lib/score';
+    import { errorMessageFrom } from '$lib/http';
+    import { toClientPrediction, type ClientPrediction, type FlightPredictionResponse } from '$lib/types';
     import type { PageData } from './$types';
-    let SunCalcPromise: Promise<any> | null = null;
 
-    export let data: PageData;
+    let { data }: { data: PageData } = $props();
 
-    let mode: 'location' | 'flight' = 'location';
+    let mode: 'location' | 'flight' = $state('location');
 
-    // Location mode state
-    let predictionData: ClientPrediction | null = null;
-    let isLoading: boolean = false;
-    let errorMessage: string = '';
-    let location: { latitude: number; longitude: number } | null = null;
-    let locationLabel: string = '';
+    // Location mode state. Deep links (?lat=&lon=&label=, e.g. from push
+    // notifications) arrive server-rendered and only seed the initial state;
+    // nothing in the app navigates to them client-side.
+    const ssr = untrack(() => data.ssr);
+    let predictionData: ClientPrediction | null = $state(ssr ? toClientPrediction(ssr) : null);
+    let isLoading: boolean = $state(false);
+    let errorMessage: string = $state('');
+    let location: { latitude: number; longitude: number } | null = $state(
+        ssr ? { latitude: ssr.latitude, longitude: ssr.longitude } : null
+    );
+    let locationLabel: string = $state(ssr?.label ?? '');
 
     // Flight mode state
-    let flightPrediction: FlightPredictionResponse | null = null;
-    let isFlightLoading: boolean = false;
+    let flightPrediction: FlightPredictionResponse | null = $state(null);
+    let isFlightLoading: boolean = $state(false);
+
+    function rememberLocation(latitude: number, longitude: number) {
+        try { localStorage.setItem('sunglow:last', JSON.stringify({ latitude, longitude, label: locationLabel })); } catch {}
+    }
 
     async function fetchPrediction(latitude: number, longitude: number) {
         isLoading = true;
@@ -35,31 +45,11 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ latitude, longitude })
             });
+            if (!res.ok) throw new Error(await errorMessageFrom(res, 'Prediction request failed'));
 
-            if (!res.ok) {
-                const errText = await res.text();
-                throw new Error(errText || 'Prediction request failed');
-            }
-
-            const data = await res.json();
-            // dynamic import to keep initial bundle smaller
-            if (!SunCalcPromise) SunCalcPromise = import('suncalc');
-            const { default: SunCalc } = await SunCalcPromise;
-            const times = SunCalc.getTimes(new Date(), latitude, longitude);
-
-            predictionData = {
-                qualityScore: data?.qualityScore ?? 0,
-                confidence: data?.confidence ?? undefined,
-                explanation: data?.explanation ?? undefined,
-                timings: {
-                    sunset: times.sunset,
-                    goldenHour: times.goldenHour
-                },
-                used: data?.used
-            };
-
-            updateTheme(predictionData.qualityScore);
-            try { localStorage.setItem('sunglow:last', JSON.stringify({ latitude, longitude, label: locationLabel })); } catch {}
+            predictionData = toClientPrediction(await res.json());
+            applyScoreTheme(predictionData.qualityScore);
+            rememberLocation(latitude, longitude);
         } catch (err) {
             errorMessage = err instanceof Error ? err.message : 'An unexpected error occurred.';
         } finally {
@@ -67,8 +57,7 @@
         }
     }
 
-    async function onLocationSuccess(event: CustomEvent<{ latitude: number; longitude: number; label?: string }>) {
-        const { latitude, longitude, label } = event.detail;
+    async function onLocationSuccess({ latitude, longitude, label }: { latitude: number; longitude: number; label?: string }) {
         location = { latitude, longitude };
         if (label) {
             locationLabel = label;
@@ -78,71 +67,25 @@
             try {
                 const res = await fetch(`/api/reverse-geocode?latitude=${encodeURIComponent(latitude)}&longitude=${encodeURIComponent(longitude)}`);
                 if (res.ok) {
-                    const data = await res.json();
-                    locationLabel = data?.label || '';
+                    const body = await res.json();
+                    locationLabel = body?.label || '';
                 }
-            } catch (e) {
+            } catch {
                 /* ignore */
             }
         }
         fetchPrediction(latitude, longitude);
     }
 
-    function onLocationError(event: CustomEvent<{ message: string }>) {
-        errorMessage = event.detail?.message || 'Failed to get location.';
+    function onLocationError({ message }: { message: string }) {
+        errorMessage = message || 'Failed to get location.';
     }
 
-    function updateTheme(score: number) {
-        const root = document.documentElement;
-        const s = Number(score || 0);
-
-        if (s > 75) {
-            root.style.setProperty('--background-start', '#2c0a2c');
-            root.style.setProperty('--background-end', '#6d2a49');
-            root.style.setProperty('--text-primary', '#ffffff');
-            root.style.setProperty('--text-accent', '#ffcc80');
-            return;
-        }
-        if (s > 50) {
-            root.style.setProperty('--background-start', '#0d3b66');
-            root.style.setProperty('--background-end', '#f95738');
-            root.style.setProperty('--text-primary', '#ffffff');
-            root.style.setProperty('--text-accent', '#f4d35e');
-            return;
-        }
-        if (s > 25) {
-            root.style.setProperty('--background-start', '#4a6fa5');
-            root.style.setProperty('--background-end', '#f7d08a');
-            root.style.setProperty('--text-primary', '#16293a');
-            root.style.setProperty('--text-accent', '#0f1a2b');
-            return;
-        }
-
-        // Poor
-        root.style.setProperty('--background-start', '#3e4a61');
-        root.style.setProperty('--background-end', '#939fab');
-        root.style.setProperty('--text-primary', '#e0e0e0');
-        root.style.setProperty('--text-accent', '#ffffff');
-    }
     // Note: we no longer auto-load the last location on mount so that a reload returns to the search view.
-
-    // Deep links (?lat=&lon=&label=, e.g. from push notifications) arrive server-rendered.
-    if (data.ssr) {
-        location = { latitude: data.ssr.latitude, longitude: data.ssr.longitude };
-        locationLabel = data.ssr.label;
-        predictionData = {
-            qualityScore: data.ssr.qualityScore,
-            confidence: data.ssr.confidence,
-            explanation: data.ssr.explanation,
-            timings: data.ssr.timings,
-            used: data.ssr.used
-        };
-    }
-
     onMount(() => {
-        if (!data.ssr) return;
-        updateTheme(data.ssr.qualityScore);
-        try { localStorage.setItem('sunglow:last', JSON.stringify({ latitude: data.ssr.latitude, longitude: data.ssr.longitude, label: locationLabel })); } catch {}
+        if (!ssr) return;
+        applyScoreTheme(ssr.qualityScore);
+        rememberLocation(ssr.latitude, ssr.longitude);
     });
 
     function switchMode(target: 'location' | 'flight') {
@@ -152,7 +95,7 @@
         flightPrediction = null;
     }
 
-    async function onFlightSubmit(event: CustomEvent<{ depIata: string; arrIata: string; depTime: string; arrTime: string }>) {
+    async function onFlightSubmit(flight: { depIata: string; arrIata: string; depTime: string; arrTime: string }) {
         isFlightLoading = true;
         errorMessage = '';
         flightPrediction = null;
@@ -161,17 +104,13 @@
             const res = await fetch('/api/predict-flight', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(event.detail)
+                body: JSON.stringify(flight)
             });
-
-            if (!res.ok) {
-                const errText = await res.text();
-                throw new Error(errText || 'Flight prediction request failed');
-            }
+            if (!res.ok) throw new Error(await errorMessageFrom(res, 'Flight prediction request failed'));
 
             flightPrediction = await res.json();
             if (flightPrediction?.qualityScore != null) {
-                updateTheme(flightPrediction.qualityScore);
+                applyScoreTheme(flightPrediction.qualityScore);
             }
         } catch (err) {
             errorMessage = err instanceof Error ? err.message : 'An unexpected error occurred.';
@@ -179,11 +118,6 @@
             isFlightLoading = false;
         }
     }
-
-    function onFlightBack() {
-        flightPrediction = null;
-    }
-
 </script>
 
 <svelte:head>
@@ -196,11 +130,9 @@
     <link rel="preconnect" href="https://geocoding-api.open-meteo.com" crossorigin="anonymous">
     <link rel="preconnect" href="https://api.bigdatacloud.net" crossorigin="anonymous">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
-    <meta name="theme-color" content="#000000" />
+    <meta name="theme-color" content="#0d3b66" />
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='40' fill='%23ffcc80'/></svg>">
     <meta name="color-scheme" content="light dark" />
-    <meta http-equiv="x-ua-compatible" content="ie=edge" />
-    <meta name="HandheldFriendly" content="true" />
 </svelte:head>
 
 <main class="shell">
@@ -210,28 +142,28 @@
     </header>
 
     <nav class="mode-toggle" aria-label="Prediction mode">
-        <button class="toggle-btn" class:active={mode === 'location'} on:click={() => switchMode('location')}>Location</button>
-        <button class="toggle-btn" class:active={mode === 'flight'} on:click={() => switchMode('flight')}>Flight</button>
+        <button class="toggle-btn" class:active={mode === 'location'} onclick={() => switchMode('location')}>Location</button>
+        <button class="toggle-btn" class:active={mode === 'flight'} onclick={() => switchMode('flight')}>Flight</button>
     </nav>
 
     {#if mode === 'location'}
         {#if isLoading}
             <div class="loader" aria-live="polite">Loading prediction…</div>
         {:else if predictionData}
-            <ResultsDisplay prediction={predictionData} locationLabel={locationLabel} confidence={predictionData?.confidence as number | undefined} />
+            <ResultsDisplay prediction={predictionData} {locationLabel} />
             {#if location}
                 <PushSubscribeButton location={{ latitude: location.latitude, longitude: location.longitude, label: locationLabel }} />
             {/if}
         {:else}
-            <LocationInput on:locationSuccess={onLocationSuccess} on:locationError={onLocationError} />
+            <LocationInput {onLocationSuccess} {onLocationError} />
         {/if}
     {:else}
         {#if isFlightLoading}
             <div class="loader" aria-live="polite">Analyzing flight route…</div>
         {:else if flightPrediction}
-            <FlightResultsDisplay prediction={flightPrediction} on:back={onFlightBack} />
+            <FlightResultsDisplay prediction={flightPrediction} onBack={() => (flightPrediction = null)} />
         {:else}
-            <FlightInput lookupAvailable={data.flightLookupAvailable} on:flightSubmit={onFlightSubmit} on:flightError={onLocationError} on:switchMode={() => switchMode('location')} />
+            <FlightInput lookupAvailable={data.flightLookupAvailable} {onFlightSubmit} onSwitchMode={() => switchMode('location')} />
         {/if}
     {/if}
 

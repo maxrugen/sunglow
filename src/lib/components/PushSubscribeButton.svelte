@@ -2,12 +2,16 @@
     import { onMount } from 'svelte';
     import { env } from '$env/dynamic/public';
 
-    // The location to attach to the subscription (from the current prediction).
-    export let location: { latitude: number; longitude: number; label?: string } | null = null;
+    interface Props {
+        /** The location to attach to the subscription (from the current prediction). */
+        location?: { latitude: number; longitude: number; label?: string } | null;
+    }
 
-    type State = 'loading' | 'unsupported' | 'ios-install' | 'default' | 'denied' | 'subscribed';
-    let state: State = 'loading';
-    let message = '';
+    let { location = null }: Props = $props();
+
+    type Status = 'loading' | 'unsupported' | 'ios-install' | 'default' | 'denied' | 'subscribed';
+    let status: Status = $state('loading');
+    let message = $state('');
 
     const vapid = env.PUBLIC_VAPID_PUBLIC_KEY;
 
@@ -46,19 +50,19 @@
 
         if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
             // On iOS, Push is only exposed once the app is installed to the Home Screen.
-            state = isIOS && !isStandalone ? 'ios-install' : 'unsupported';
+            status = isIOS && !isStandalone ? 'ios-install' : 'unsupported';
             return;
         }
         if (Notification.permission === 'denied') {
-            state = 'denied';
+            status = 'denied';
             return;
         }
         try {
             const reg = await navigator.serviceWorker.getRegistration();
             const sub = reg ? await reg.pushManager.getSubscription() : null;
-            state = sub ? 'subscribed' : 'default';
+            status = sub ? 'subscribed' : 'default';
         } catch {
-            state = 'default';
+            status = 'default';
         }
     });
 
@@ -73,11 +77,11 @@
             message = 'Pick a location first, then enable alerts for it.';
             return;
         }
-        state = 'loading';
+        status = 'loading';
         try {
             const permission = await Notification.requestPermission();
             if (permission !== 'granted') {
-                state = permission === 'denied' ? 'denied' : 'default';
+                status = permission === 'denied' ? 'denied' : 'default';
                 message = 'Notification permission was not granted.';
                 return;
             }
@@ -98,17 +102,17 @@
                 })
             });
             if (!res.ok) throw new Error('server rejected the subscription');
-            state = 'subscribed';
+            status = 'subscribed';
             message = 'Subscribed — sunset alerts will arrive on this device.';
         } catch (e) {
-            state = 'default';
+            status = 'default';
             message = `Could not subscribe: ${(e as Error).message}`;
         }
     }
 
     async function unsubscribe() {
         message = '';
-        state = 'loading';
+        status = 'loading';
         try {
             const reg = await navigator.serviceWorker.getRegistration();
             const sub = reg ? await reg.pushManager.getSubscription() : null;
@@ -120,34 +124,34 @@
                 });
                 await sub.unsubscribe();
             }
-            state = 'default';
+            status = 'default';
             message = 'Unsubscribed on this device.';
         } catch {
-            state = 'subscribed';
+            status = 'subscribed';
             message = 'Could not unsubscribe.';
         }
     }
 </script>
 
 <div class="push">
-    {#if state === 'loading'}
+    {#if status === 'loading'}
         <button class="push-btn" disabled>…</button>
-    {:else if state === 'ios-install'}
+    {:else if status === 'ios-install'}
         <p class="push-hint">
             On iPhone, tap <strong>Share → Add to Home Screen</strong>, then open Sunglow from the
             Home Screen and return here to enable alerts.
         </p>
-    {:else if state === 'unsupported'}
+    {:else if status === 'unsupported'}
         <p class="push-hint">Push notifications aren’t supported in this browser.</p>
-    {:else if state === 'denied'}
+    {:else if status === 'denied'}
         <p class="push-hint">
             Notifications are blocked. Enable them for this site in your browser or OS settings, then
             reload.
         </p>
-    {:else if state === 'subscribed'}
-        <button class="push-btn" on:click={unsubscribe}>🔕 Disable sunset alerts</button>
+    {:else if status === 'subscribed'}
+        <button class="push-btn" onclick={unsubscribe}>🔕 Disable sunset alerts</button>
     {:else}
-        <button class="push-btn" on:click={subscribe}>🔔 Alert me for great sunsets here</button>
+        <button class="push-btn" onclick={subscribe}>🔔 Alert me for great sunsets here</button>
     {/if}
 
     {#if message}
