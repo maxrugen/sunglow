@@ -48,6 +48,13 @@ export function toClientPrediction(p: PredictionSummary): ClientPrediction {
 
 // Flight sunset prediction types
 
+/** An airline from src/lib/data/airlines.json (Wikidata), by IATA code. */
+export type Airline = {
+  iata: string;
+  icao?: string;
+  name: string;
+};
+
 export type Airport = {
   iata: string;
   name: string;

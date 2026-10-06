@@ -217,7 +217,7 @@ Response (shape abbreviated):
 - `src/lib/components/FlightInput.svelte`
   - Airport search across 5,469 airports (IATA prefix match + city/name substring)
   - Tabs: Flight number, Route (list of that day's flights) and Enter times (manual fallback); the search tabs need `AIRLABS_API_KEY`
-  - Flight numbers can be IATA or ICAO and zero-padded (`UA0108`, `UAL0108`); on busy routes the free AirLabs plan (50 rows) cuts the list short, and the list says so
+  - Flight numbers can be IATA or ICAO and zero-padded (`UA0108`, `UAL0108`); on busy routes the free AirLabs plan (50 rows) cuts the list short: Sunglow fills in airlines it can infer from codeshares, says the list isn't complete, and the optional Airline field gets one airline's complete list
   - Manual tab: date, departure and arrival times, with next‑day handling on the server
   - Keyboard navigation and validation
 
@@ -259,6 +259,7 @@ src/
       PushSubscribeButton.svelte   # opt-in sunset alerts
     data/
       airports.json                # 5,469 airports (OurAirports)
+      airlines.json                # ~900 airlines (Wikidata, scripts/build-airlines.mjs)
     server/
       scoring.ts                   # scoring + confidence + evaluate + evaluateInFlight
       weather.ts                   # Open-Meteo fetches, hour selection, weighted composites

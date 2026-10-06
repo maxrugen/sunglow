@@ -31,6 +31,7 @@ export type ScheduledFlight = {
 type RouteRow = {
   flight_iata?: string | null;
   airline_iata?: string | null;
+  cs_airline_iata?: string | null;
   cs_flight_iata?: string | null;
   dep_iata?: string | null;
   arr_iata?: string | null;
@@ -122,33 +123,46 @@ export function flightsOn(flights: ScheduledFlight[], date: string): ScheduledFl
   return flights.filter((f) => best.get(f.flightIata) === f);
 }
 
-export type RouteQuery = { flight: FlightNumber } | { from: string; to: string };
+export type RouteQuery = { flight: FlightNumber } | { from: string; to: string; airline?: string };
 
 export type Schedules = {
   flights: ScheduledFlight[];
   /**
    * AirLabs returned only part of the timetable. Free keys get the first 50
-   * rows and can't page further (`offset` returns nothing), and codeshares
-   * count as rows, so busy routes (JFK→LAX: ~400 rows) come back cut short.
+   * rows, sorted by airline code, and can't page further (`offset` returns
+   * nothing). Codeshares count as rows, so on busy routes (JFK→LAX: ~400
+   * rows) every airline after the first few is cut off.
    */
   incomplete: boolean;
 };
 
+type Page = { rows: RouteRow[]; hasMore: boolean };
+
 /** Timetables change rarely; caching protects the monthly request quota. */
-const cache = new BoundedCache<Schedules>(24 * 3600 * 1000, 300);
+const cache = new BoundedCache<Page>(24 * 3600 * 1000, 300);
+
+/** Extra airline-filtered requests when a route comes back cut short (each cached for a day). */
+export const MAX_EXPANSIONS = 2;
 
 /**
- * Timetable entries for a flight number or a route, or null if AirLabs is
- * unavailable. One request per query and day (cached).
+ * Airlines whose own rows were cut off, found through the codeshares that
+ * point at their flights (AF/AM rows → DL), most-referenced first. Filtering
+ * by one of them fetches its complete list for the route.
  */
-export async function fetchSchedules(query: RouteQuery): Promise<Schedules | null> {
-  const key = env.AIRLABS_API_KEY;
-  if (!key) return null;
-  const params = new URLSearchParams(
-    'flight' in query
-      ? { [query.flight.system === 'icao' ? 'flight_icao' : 'flight_iata']: query.flight.code }
-      : { dep_iata: query.from, arr_iata: query.to }
-  );
+export function hiddenCarriers(rows: RouteRow[]): string[] {
+  const listed = new Set(rows.filter((r) => !r.cs_flight_iata && r.airline_iata).map((r) => r.airline_iata!.toUpperCase()));
+  const references = new Map<string, number>();
+  for (const r of rows) {
+    if (!r.cs_flight_iata) continue;
+    const carrier = (r.cs_airline_iata ?? r.cs_flight_iata.slice(0, 2)).toUpperCase();
+    if (!listed.has(carrier)) references.set(carrier, (references.get(carrier) ?? 0) + 1);
+  }
+  return [...references].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([carrier]) => carrier);
+}
+
+/** One AirLabs /routes request (cached), or null if it failed. */
+async function fetchRoutes(query: Record<string, string>, key: string): Promise<Page | null> {
+  const params = new URLSearchParams(query);
   const cacheKey = params.toString();
   const cached = cache.get(cacheKey);
   if (cached) return cached;
@@ -166,11 +180,47 @@ export async function fetchSchedules(query: RouteQuery): Promise<Schedules | nul
       console.error('[airlabs] routes failed', res.status, JSON.stringify(body?.error ?? null).slice(0, 200));
       return null;
     }
-    const schedules = { flights: toScheduledFlights(body.response), incomplete: body.request?.has_more === true };
-    cache.set(cacheKey, schedules);
-    return schedules;
+    const page = { rows: body.response, hasMore: body.request?.has_more === true };
+    cache.set(cacheKey, page);
+    return page;
   } catch (err) {
     console.error('[airlabs] routes request failed', (err as Error).name);
     return null;
   }
+}
+
+/**
+ * Timetable entries for a flight number or a route (optionally one airline),
+ * or null if AirLabs is unavailable. One request per query, except a cut-short
+ * route without an airline: then up to MAX_EXPANSIONS airline-filtered
+ * requests fill in the airlines its codeshares point to.
+ */
+export async function fetchSchedules(query: RouteQuery): Promise<Schedules | null> {
+  const key = env.AIRLABS_API_KEY;
+  if (!key) return null;
+
+  if ('flight' in query) {
+    const param = query.flight.system === 'icao' ? 'flight_icao' : 'flight_iata';
+    const page = await fetchRoutes({ [param]: query.flight.code }, key);
+    return page && { flights: toScheduledFlights(page.rows), incomplete: page.hasMore };
+  }
+
+  const route = { dep_iata: query.from, arr_iata: query.to };
+  if (query.airline) {
+    const page = await fetchRoutes({ ...route, airline_iata: query.airline }, key);
+    return page && { flights: toScheduledFlights(page.rows), incomplete: page.hasMore };
+  }
+
+  const first = await fetchRoutes(route, key);
+  if (!first) return null;
+  if (!first.hasMore) return { flights: toScheduledFlights(first.rows), incomplete: false };
+
+  const extra = await Promise.all(
+    hiddenCarriers(first.rows)
+      .slice(0, MAX_EXPANSIONS)
+      .map((airline) => fetchRoutes({ ...route, airline_iata: airline }, key))
+  );
+  const rows = [...first.rows, ...extra.flatMap((page) => page?.rows ?? [])];
+  // Other airlines can still be missing: nothing points to them.
+  return { flights: toScheduledFlights(rows), incomplete: true };
 }

@@ -1,10 +1,12 @@
 <script lang="ts">
-    import type { Airport } from '#lib/types.js';
+    import type { Airline, Airport } from '#lib/types.js';
     import Combobox from './Combobox.svelte';
 
     type FlightSubmitDetail = { depIata: string; arrIata: string; depTime: string; arrTime: string };
     type ScheduledFlight = {
         flightIata: string;
+        airlineIata: string;
+        airlineName?: string;
         depIata: string;
         arrIata: string;
         depName?: string;
@@ -48,6 +50,9 @@
     let arrResults: Airport[] = $state([]);
     let selectedDep: Airport | null = $state(null);
     let selectedArr: Airport | null = $state(null);
+    let airlineSearch: string = $state('');
+    let airlineResults: Airline[] = $state([]);
+    let selectedAirline: Airline | null = $state(null);
     let depTime: string = $state('');
     let arrTime: string = $state('');
 
@@ -60,6 +65,8 @@
 
     const airportLabel = (a: Airport) => `${a.iata} – ${a.name}`;
     const resultsStatus = (n: number) => (n ? `${n} airport${n === 1 ? '' : 's'} found` : '');
+    const airlineLabel = (a: Airline) => `${a.name} (${a.iata})`;
+    const airlineStatus = (n: number) => (n ? `${n} airline${n === 1 ? '' : 's'} found` : '');
     const duration = (min?: number) => (min ? `${Math.floor(min / 60)}h ${String(min % 60).padStart(2, '0')}m` : '');
 
     // Airport search runs on the server so the dataset stays out of the bundle.
@@ -80,6 +87,40 @@
         } catch {
             return [];
         }
+    }
+
+    // eslint-disable-next-line svelte/prefer-svelte-reactivity
+    const airlineCache = new Map<string, Airline[]>();
+    async function searchAirline(query: string): Promise<Airline[]> {
+        const q = query.trim().toUpperCase();
+        if (q.length < 2) return [];
+        const cached = airlineCache.get(q);
+        if (cached) return cached;
+        try {
+            const res = await fetch(`/api/airlines?q=${encodeURIComponent(q)}`);
+            if (!res.ok) return [];
+            const results: Airline[] = (await res.json())?.results ?? [];
+            airlineCache.set(q, results);
+            return results;
+        } catch {
+            return [];
+        }
+    }
+
+    let airlineDebounce: ReturnType<typeof setTimeout>;
+    function onAirlineInput(text: string) {
+        if (selectedAirline && text !== airlineLabel(selectedAirline)) selectedAirline = null;
+        clearTimeout(airlineDebounce);
+        airlineDebounce = setTimeout(async () => {
+            const results = await searchAirline(text);
+            if (text === airlineSearch && !selectedAirline) airlineResults = results;
+        }, 150);
+    }
+
+    function selectAirline(a: Airline) {
+        selectedAirline = a;
+        airlineSearch = airlineLabel(a);
+        airlineResults = [];
     }
 
     let depDebounce: ReturnType<typeof setTimeout>;
@@ -147,6 +188,8 @@
             if (!selectedArr) { errorMessage = 'Pick an arrival airport.'; return; }
             params.set('from', selectedDep.iata);
             params.set('to', selectedArr.iata);
+            if (airlineSearch.trim() && !selectedAirline) { errorMessage = 'Pick an airline from the list, or clear the field.'; return; }
+            if (selectedAirline) params.set('airline', selectedAirline.iata);
         }
         if (!dateStr) { errorMessage = 'Pick a date.'; return; }
 
@@ -266,7 +309,25 @@
             {:else}
                 {@render airportField('dep')}
                 {@render airportField('arr')}
-                {@render dateField()}
+                <div class="row">
+                    <div class="field grow">
+                        <Combobox
+                            id="airline-input"
+                            label="Airline (optional)"
+                            placeholder="Any airline"
+                            bind:value={airlineSearch}
+                            items={airlineResults}
+                            status={airlineStatus(airlineResults.length)}
+                            onInput={onAirlineInput}
+                            onSelect={selectAirline}
+                        >
+                            {#snippet option(a)}
+                                <span><strong class="iata">{a.iata}</strong> {a.name}</span>
+                            {/snippet}
+                        </Combobox>
+                    </div>
+                    {@render dateField()}
+                </div>
             {/if}
             <button class="btn primary" type="submit" disabled={isSearching}>
                 {isSearching ? 'Searching…' : mode === 'number' ? 'Find flight' : 'Find flights'}
@@ -285,7 +346,9 @@
                                     <span>{f.depIata} {f.depTime} → {f.arrIata} {f.arrTime}</span>
                                 </span>
                                 <small>
-                                    {duration(f.durationMin)}{#if f.codeshares.length}{duration(f.durationMin) ? ' · ' : ''}also {f.codeshares.slice(0, 3).join(', ')}{/if}
+                                    {[f.airlineName, duration(f.durationMin), f.codeshares.length ? `also ${f.codeshares.slice(0, 3).join(', ')}` : '']
+                                        .filter(Boolean)
+                                        .join(' · ')}
                                 </small>
                             </button>
                         </li>

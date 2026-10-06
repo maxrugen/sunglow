@@ -2,15 +2,17 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { airlabsConfigured, fetchSchedules, flightsOn, weekdayOf, type RouteQuery } from '#lib/server/airlabs.js';
 import { airportByIata } from '#lib/server/airports.js';
+import { airlineByIata } from '#lib/server/airlines.js';
 import { parseFlightNumber } from '#lib/flight-number.js';
 
 const IATA = /^[A-Z]{3}$/;
+const AIRLINE = /^(?=.*[A-Z])[A-Z0-9]{2}$/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const DAY_NAMES = { mon: 'Mondays', tue: 'Tuesdays', wed: 'Wednesdays', thu: 'Thursdays', fri: 'Fridays', sat: 'Saturdays', sun: 'Sundays' };
 
 /**
  * GET /api/flight-schedules?flight=UA2410&date=2026-10-07   (IATA or ICAO, e.g. UAL2410)
- * GET /api/flight-schedules?from=IAD&to=SLC&date=2026-10-07
+ * GET /api/flight-schedules?from=IAD&to=SLC&date=2026-10-07[&airline=UA]
  *
  * Flights from the AirLabs timetable that operate on `date` (the local
  * departure date), with local departure/arrival times ready for
@@ -24,6 +26,7 @@ export const GET: RequestHandler = async ({ url }) => {
   const rawFlight = url.searchParams.get('flight')?.trim();
   const from = url.searchParams.get('from')?.trim().toUpperCase();
   const to = url.searchParams.get('to')?.trim().toUpperCase();
+  const airline = url.searchParams.get('airline')?.trim().toUpperCase() || undefined;
   const date = url.searchParams.get('date')?.trim() ?? '';
 
   if (!DATE.test(date) || Number.isNaN(Date.parse(date))) {
@@ -38,7 +41,8 @@ export const GET: RequestHandler = async ({ url }) => {
   } else if (from && to) {
     if (!IATA.test(from) || !IATA.test(to)) return json({ error: 'Pick both airports.' }, { status: 400 });
     if (from === to) return json({ error: 'Departure and arrival airports are the same.' }, { status: 400 });
-    query = { from, to };
+    if (airline && !AIRLINE.test(airline)) return json({ error: 'Pick an airline from the list.' }, { status: 400 });
+    query = { from, to, airline };
   } else {
     return json({ error: 'Enter a flight number, or pick both airports.' }, { status: 400 });
   }
@@ -52,21 +56,26 @@ export const GET: RequestHandler = async ({ url }) => {
   const known = schedules.flights.filter((f) => airportByIata(f.depIata) && airportByIata(f.arrIata));
   const flights = flightsOn(known, date);
 
+  const airlineName = airline ? (airlineByIata(airline)?.name ?? airline) : undefined;
+  const routeLabel = `${from} → ${to}`;
   let message: string | undefined;
   if (!flight && schedules.incomplete) {
-    // Route lists cut short by AirLabs: a flight-number search still finds the missing ones.
-    message =
-      flights.length === 0
-        ? `${from} → ${to} is a busy route and the timetable only lists some of its flights. Try searching by flight number.`
-        : 'Busy route: the timetable only lists some of its flights. If yours is missing, search by flight number.';
+    // AirLabs cut the list short: an airline or a flight number narrows the search enough.
+    message = airline
+      ? `Even for ${airlineName}, ${routeLabel} only lists some flights. If yours is missing, search by flight number.`
+      : flights.length === 0
+        ? `${routeLabel} is a busy route and the timetable only lists some airlines. Pick your airline, or search by flight number.`
+        : 'Busy route: some airlines may be missing. If yours is, pick your airline or search by flight number.';
   } else if (flights.length === 0) {
     if (known.length === 0) {
-      message = flight ? `No timetable found for ${flight}.` : `No timetable found for ${from} → ${to}.`;
+      message = flight
+        ? `No timetable found for ${flight}.`
+        : `No timetable found for ${airlineName ? `${airlineName} on ` : ''}${routeLabel}.`;
     } else if (flight) {
       const days = [...new Set(known.flatMap((f) => f.days))];
       message = `${flight} doesn't fly on ${DAY_NAMES[weekdayOf(date)]}.${days.length ? ` It flies on ${days.map((d) => DAY_NAMES[d]).join(', ')}.` : ''}`;
     } else {
-      message = `No flights from ${from} to ${to} on that day.`;
+      message = `No ${airlineName ? `${airlineName} ` : ''}flights from ${from} to ${to} on that day.`;
     }
   }
 
@@ -75,6 +84,7 @@ export const GET: RequestHandler = async ({ url }) => {
       date,
       flights: flights.map((f) => ({
         ...f,
+        airlineName: airlineByIata(f.airlineIata)?.name,
         depName: airportByIata(f.depIata)?.name,
         arrName: airportByIata(f.arrIata)?.name,
       })),
