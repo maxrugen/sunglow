@@ -23,7 +23,7 @@ Sunset and sunrise quality prediction web app built with SvelteKit and TypeScrip
 - SvelteKit (Svelte 5) + Vite, deployed on Vercel
 - TypeScript
 - SunCalc
-- Open‑Meteo (Weather + Geocoding) and BigDataCloud (fallback reverse geocode)
+- Open‑Meteo (Weather + Geocoding) and BigDataCloud (reverse geocoding, called from the browser)
 - Plain CSS with CSS Custom Properties
 - Neon Postgres + Drizzle (push subscriptions), Web Push (VAPID)
 
@@ -154,7 +154,7 @@ Notes:
 `GET /api/geocode?q=Berlin` → Open‑Meteo Geocoding proxy
 
 #### Reverse Geocoding
-`GET /api/reverse-geocode?latitude=…&longitude=…` → Open‑Meteo reverse geocode, with BigDataCloud fallback
+"Use My Location" turns coordinates into a place name in the browser via BigDataCloud's free client-side API (`src/lib/reverse-geocode.ts`). Open‑Meteo has no reverse geocoding endpoint.
 
 #### Flight Prediction
 `POST /api/predict-flight`
@@ -282,7 +282,6 @@ src/
       predict-flight/+server.ts    # flight prediction endpoint
       flight-lookup/+server.ts     # AviationStack proxy (optional)
       geocode/+server.ts           # city → coords proxy
-      reverse-geocode/+server.ts   # coords → label proxy (+fallback)
       push/{subscribe,unsubscribe} # store/remove push subscriptions
       ratings/+server.ts           # store "How was it?" ratings
       cron/+server.ts              # hourly sunset-alert job
@@ -299,6 +298,8 @@ Optional. Copy `.env.example` to `.env.local` and set `DATABASE_URL`, the VAPID 
   - **Sunrise, evening before:** between 20:00 and 23:00 local (`SUNRISE_EVENING_HOUR`), for tomorrow's sunrise.
   - **Sunrise, morning:** 1–2 hours before sunrise (`SUNRISE_LEAD_HOURS`).
   - Each kind at most once per event. Alerts are claimed in the database before sending, so overlapping runs can't send twice.
+  - Pushes expire 30 minutes after the event if the device was offline, so a late phone never shows yesterday's alert. Subscriptions the push service rejects as gone or invalid are deleted.
+  - The endpoint returns 500 when any alert failed, so cron-job.org reports the failed run.
 - Vercel Hobby crons only run daily, so an hourly job on [cron-job.org](https://cron-job.org) calls the endpoint with the bearer header. GitHub Actions schedules were too unreliable (runs 6–9 h apart). `.github/workflows/cron.yml` remains for manual runs and needs the `APP_URL` and `CRON_SECRET` repository secrets.
 
 ---

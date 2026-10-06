@@ -9,6 +9,7 @@
     import { onMount, untrack } from 'svelte';
     import { applyScoreTheme } from '$lib/score';
     import { errorMessageFrom } from '$lib/http';
+    import { reverseGeocode } from '$lib/reverse-geocode';
     import { toClientPrediction, type ClientPrediction, type FlightPredictionResponse, type SkyEvent } from '$lib/types';
     import { EVENT_COPY, SKY_EVENTS, isSkyEvent } from '$lib/events';
     import type { PageData } from './$types';
@@ -69,17 +70,9 @@
         if (label) {
             locationLabel = label;
         } else {
-            locationLabel = `${latitude.toFixed(3)}, ${longitude.toFixed(3)}`; // temporary placeholder
-            // reverse geocode for a friendly name
-            try {
-                const res = await fetch(`/api/reverse-geocode?latitude=${encodeURIComponent(latitude)}&longitude=${encodeURIComponent(longitude)}`);
-                if (res.ok) {
-                    const body = await res.json();
-                    locationLabel = body?.label || '';
-                }
-            } catch {
-                /* ignore */
-            }
+            // Coordinates until (or unless) a friendly name comes back.
+            locationLabel = `${latitude.toFixed(3)}, ${longitude.toFixed(3)}`;
+            locationLabel = (await reverseGeocode(latitude, longitude)) ?? locationLabel;
         }
         fetchPrediction(latitude, longitude);
     }

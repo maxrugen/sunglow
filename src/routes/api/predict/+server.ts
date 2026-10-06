@@ -2,6 +2,7 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { predictEvent, PredictionError } from '$lib/server/prediction';
 import { createRatingToken } from '$lib/server/ratings';
+import { parseLatLon } from '$lib/server/validate';
 
 export const POST: RequestHandler = async ({ request }) => {
   let body: { latitude?: unknown; longitude?: unknown; event?: unknown };
@@ -11,11 +12,11 @@ export const POST: RequestHandler = async ({ request }) => {
     return json({ error: 'Invalid JSON body' }, { status: 400 });
   }
 
-  const latitude = Number(body?.latitude);
-  const longitude = Number(body?.longitude);
-  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+  const coords = parseLatLon(body?.latitude, body?.longitude);
+  if (!coords) {
     return json({ error: 'Invalid or missing latitude/longitude' }, { status: 400 });
   }
+  const { latitude, longitude } = coords;
 
   const event = body?.event ?? 'sunset';
   if (event !== 'sunset' && event !== 'sunrise') {
@@ -24,7 +25,7 @@ export const POST: RequestHandler = async ({ request }) => {
 
   try {
     const payload = await predictEvent({ latitude, longitude, event });
-    // Short-lived caching by proxies/clients; the server also caches per sunset hour.
+    // Short-lived caching by proxies/clients; the server also caches per event hour.
     return json(
       { ...payload, ratingToken: createRatingToken(payload) },
       { headers: { 'Cache-Control': 'public, max-age=120' } }

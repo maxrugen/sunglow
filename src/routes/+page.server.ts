@@ -2,6 +2,7 @@ import { env } from '$env/dynamic/private';
 import type { PageServerLoad } from './$types';
 import { predictEvent } from '$lib/server/prediction';
 import { createRatingToken } from '$lib/server/ratings';
+import { cleanLabel, parseLatLon } from '$lib/server/validate';
 import type { SkyEvent } from '$lib/types';
 
 /**
@@ -9,22 +10,15 @@ import type { SkyEvent } from '$lib/types';
  * (e.g. from push notifications). `event` alone preselects the Sunset/Sunrise switch.
  */
 export const load: PageServerLoad = async ({ url }) => {
-  const latitude = Number(url.searchParams.get('lat'));
-  const longitude = Number(url.searchParams.get('lon'));
-  const label = url.searchParams.get('label') || '';
+  const label = cleanLabel(url.searchParams.get('label')) ?? '';
   const eventParam = url.searchParams.get('event');
   const event: SkyEvent | undefined = eventParam === 'sunrise' || eventParam === 'sunset' ? eventParam : undefined;
   // Lets the flight form show the lookup without probing (and spending quota on) the API.
   const flightLookupAvailable = Boolean(env.AVIATIONSTACK_API_KEY);
 
-  const valid =
-    url.searchParams.has('lat') &&
-    url.searchParams.has('lon') &&
-    Number.isFinite(latitude) &&
-    Number.isFinite(longitude) &&
-    Math.abs(latitude) <= 90 &&
-    Math.abs(longitude) <= 180;
-  if (!valid) return { flightLookupAvailable, event };
+  const coords = parseLatLon(url.searchParams.get('lat'), url.searchParams.get('lon'));
+  if (!coords) return { flightLookupAvailable, event };
+  const { latitude, longitude } = coords;
 
   try {
     const payload = await predictEvent({ latitude, longitude, event: event ?? 'sunset' });

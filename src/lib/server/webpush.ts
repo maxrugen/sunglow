@@ -52,14 +52,35 @@ function ensureVapid() {
   vapidReady = true;
 }
 
+export type SendOptions = {
+  /** Seconds the push service may hold the message for an offline device; after that it's dropped. */
+  ttlSeconds?: number;
+};
+
+const SEND_TIMEOUT_MS = 5000;
+
 /**
- * Send a push to a single stored subscription. On 404/410 the endpoint is gone,
- * so the row is pruned. Returns 'sent' | 'pruned' | 'failed' for the caller's
- * summary. Rejects endpoints that fail the SSRF allowlist.
+ * Whether a send error means this subscription can never succeed:
+ * 404/410 (gone), 400 (the push service rejected it), or keys web-push
+ * refuses to encrypt with. 403 (usually our VAPID setup) and 413 (our
+ * payload) are not the subscription's fault, so they don't prune.
+ */
+function isPermanentFailure(e: unknown): boolean {
+  const code = (e as { statusCode?: number }).statusCode;
+  if (code === 400 || code === 404 || code === 410) return true;
+  // web-push's own key/endpoint validation errors (thrown before anything is sent).
+  return code === undefined && /^(The subscription|No user auth|You must pass in a subscription)/.test((e as Error)?.message ?? '');
+}
+
+/**
+ * Send a push to a single stored subscription. Subscriptions that can never be
+ * delivered to are pruned. Returns 'sent' | 'pruned' | 'failed' | 'skipped' for
+ * the caller's summary. Rejects endpoints that fail the SSRF allowlist.
  */
 export async function sendPush(
   sub: Pick<PushSubscriptionRow, 'endpoint' | 'p256dh' | 'auth'>,
-  payload: PushPayload
+  payload: PushPayload,
+  options: SendOptions = {}
 ): Promise<'sent' | 'pruned' | 'failed' | 'skipped'> {
   if (!webPushConfigured()) return 'skipped';
   if (!isAllowedPushEndpoint(sub.endpoint)) return 'skipped';
@@ -68,15 +89,21 @@ export async function sendPush(
   try {
     await webpush.sendNotification(
       { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
-      JSON.stringify(payload)
+      JSON.stringify(payload),
+      {
+        // Without a TTL the default is 4 weeks: "great sunset tonight" could arrive days later.
+        TTL: Math.max(60, Math.round(options.ttlSeconds ?? 6 * 3600)),
+        urgency: 'high',
+        timeout: SEND_TIMEOUT_MS,
+      }
     );
     return 'sent';
   } catch (e) {
-    const code = (e as { statusCode?: number }).statusCode;
-    if (code === 404 || code === 410) {
+    if (isPermanentFailure(e)) {
       await db.delete(pushSubscriptions).where(eq(pushSubscriptions.endpoint, sub.endpoint));
       return 'pruned';
     }
+    console.error('[webpush] send failed', (e as { statusCode?: number }).statusCode ?? (e as Error)?.message);
     return 'failed';
   }
 }

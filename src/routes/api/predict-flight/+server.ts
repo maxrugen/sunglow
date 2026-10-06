@@ -10,13 +10,12 @@ import {
 import { airQualityAt, compositeAt, fetchAirQuality, fetchForecast, nearestIndex } from '$lib/server/weather';
 import { resolveFlightTimes, timeZoneAt } from '$lib/server/flight-time';
 import { airportByIata } from '$lib/server/airports';
+import { BoundedCache } from '$lib/server/bounded-cache';
 import type { WeatherData } from '$lib/server/scoring';
 import type { RequestHandler } from './$types';
 import type { EventWaypoint, FlightPredictionResponse, FlightSighting } from '$lib/types';
 
-// In-memory cache
-const cache = new Map<string, { ts: number; payload: FlightPredictionResponse }>();
-const CACHE_TTL_MS = 10 * 60 * 1000;
+const cache = new BoundedCache<FlightPredictionResponse>(10 * 60 * 1000);
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** Open-Meteo's forecast horizon. */
@@ -108,8 +107,13 @@ async function toSighting(wp: EventWaypoint): Promise<FlightSighting> {
 }
 
 export const POST: RequestHandler = async ({ request }) => {
+  let body: Record<string, unknown>;
   try {
-    const body = await request.json();
+    body = await request.json();
+  } catch {
+    return json({ error: 'Invalid JSON body.' }, { status: 400 });
+  }
+  try {
     const depIata = String(body?.depIata ?? '').trim().toUpperCase();
     const arrIata = String(body?.arrIata ?? '').trim().toUpperCase();
     const depTimeStr = String(body?.depTime ?? '');
@@ -150,13 +154,12 @@ export const POST: RequestHandler = async ({ request }) => {
       return json({ error: 'Flight duration exceeds 24 hours.' }, { status: 400 });
     }
 
-    // Check cache
     // Exact times: the response echoes them and sightings depend on them, so
     // rounding (e.g. to the hour) would serve another flight's answer.
     const cacheKey = `${depIata}-${arrIata}-${depTimeMs}-${arrTimeMs}`;
     const cached = cache.get(cacheKey);
-    if (cached && Date.now() - cached.ts < CACHE_TTL_MS) {
-      return json(cached.payload, { headers: { 'Cache-Control': 'public, max-age=120' } });
+    if (cached) {
+      return json(cached, { headers: { 'Cache-Control': 'public, max-age=120' } });
     }
 
     // Interpolate route
@@ -185,7 +188,7 @@ export const POST: RequestHandler = async ({ request }) => {
             "No sunrise or sunset happens during this flight. The sun is either up or down the whole time, or doesn't rise or set at these latitudes on this date.",
         };
 
-    cache.set(cacheKey, { ts: Date.now(), payload });
+    cache.set(cacheKey, payload);
     return json(payload, { headers: { 'Cache-Control': 'public, max-age=120' } });
   } catch (err: unknown) {
     console.error('[predict-flight]', err);

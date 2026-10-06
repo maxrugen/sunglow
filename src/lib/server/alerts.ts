@@ -1,6 +1,6 @@
 import { nextEvent, type PredictionPayload } from '$lib/server/prediction';
 import { timeZoneAt } from '$lib/server/flight-time';
-import type { PushPayload } from '$lib/server/webpush';
+import type { PushPayload, SendOptions } from '$lib/server/webpush';
 import type { PushSubscriptionRow } from '$lib/server/db/schema';
 import type { SkyEvent } from '$lib/types';
 
@@ -120,7 +120,7 @@ export type AlertDeps<S extends AlertSubscription> = {
   claim: (sub: S, due: AlertDue) => Promise<boolean>;
   /** Undo a claim after a failed send so the next run retries. */
   release: (sub: S, due: AlertDue) => Promise<void>;
-  send: (sub: S, message: PushPayload) => Promise<'sent' | 'pruned' | 'failed' | 'skipped'>;
+  send: (sub: S, message: PushPayload, options: SendOptions) => Promise<'sent' | 'pruned' | 'failed' | 'skipped'>;
 };
 
 export type AlertOutcome = 'sent' | 'below-threshold' | 'already-claimed' | 'predict-failed' | 'send-failed' | 'pruned';
@@ -142,7 +142,8 @@ export async function runAlerts<S extends AlertSubscription>(
     let payload: PredictionPayload;
     try {
       payload = await deps.predict(due.event, sub);
-    } catch {
+    } catch (err) {
+      console.error('[alerts] prediction failed', due.kind, err);
       results.push({ kind: due.kind, outcome: 'predict-failed' }); // not claimed: retried next run
       continue;
     }
@@ -154,7 +155,9 @@ export async function runAlerts<S extends AlertSubscription>(
       results.push({ kind: due.kind, outcome: 'below-threshold' });
       continue;
     }
-    const result = await deps.send(sub, alertMessage(due, sub, payload, appUrl));
+    // Worthless once the event (and its afterglow) is over, so let undelivered pushes expire.
+    const ttlSeconds = (due.eventTime.getTime() - now.getTime()) / 1000 + 30 * 60;
+    const result = await deps.send(sub, alertMessage(due, sub, payload, appUrl), { ttlSeconds });
     if (result === 'sent') {
       results.push({ kind: due.kind, outcome: 'sent' });
     } else if (result === 'pruned') {

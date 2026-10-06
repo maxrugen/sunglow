@@ -24,8 +24,12 @@ function call(body: Record<string, unknown>) {
   return POST({ request } as Parameters<typeof POST>[0]);
 }
 
+// Shaped like real Push API keys: a 65-byte P-256 point and a 16-byte secret.
+const P256DH = Buffer.alloc(65, 4).toString('base64url');
+const AUTH = Buffer.alloc(16, 7).toString('base64url');
+
 const base = {
-  subscription: { endpoint: 'https://fcm.googleapis.com/fcm/send/abc', keys: { p256dh: 'p', auth: 'a' } },
+  subscription: { endpoint: 'https://fcm.googleapis.com/fcm/send/abc', keys: { p256dh: P256DH, auth: AUTH } },
   latitude: 52.52,
   longitude: 13.405,
   label: 'Berlin',
@@ -57,6 +61,16 @@ describe('POST /api/push/subscribe', () => {
     existing = { latitude: 48.14, longitude: 11.58 };
     await call(base);
     expect(upsert!.set).toMatchObject({ lastNotifiedDate: null, lastSunriseEveningDate: null, lastSunriseMorningDate: null });
+  });
+
+  it('rejects malformed keys, bad coordinates and caps long labels', async () => {
+    const badKeys = { ...base, subscription: { ...base.subscription, keys: { p256dh: 'short', auth: AUTH } } };
+    expect((await call(badKeys)).status).toBe(400);
+    expect((await call({ ...base, latitude: 95 })).status).toBe(400);
+    expect(upsert).toBeNull();
+
+    await call({ ...base, label: `  ${'x'.repeat(200)}  ` });
+    expect((upsert!.values.label as string).length).toBe(80);
   });
 
   it('rejects turning every event off', async () => {

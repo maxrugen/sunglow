@@ -107,6 +107,13 @@ describe('runAlerts()', () => {
     return deps;
   }
 
+  it('lets undelivered pushes expire 30 minutes after the event', async () => {
+    const deps = fakeDeps();
+    await runAlerts(sub({ alertSunset: false }), now, config, 'https://x', deps);
+    const options = (deps.send.mock.calls[0] as unknown[])[2] as { ttlSeconds: number };
+    expect(options.ttlSeconds).toBeCloseTo(1.5 * 3600 + 30 * 60, 0);
+  });
+
   it('sends once even if two runs overlap', async () => {
     const deps = fakeDeps();
     const s = sub({ alertSunset: false });
