@@ -4,6 +4,8 @@ Sunset and sunrise quality prediction web app built with SvelteKit and TypeScrip
 
 ### Features
 - Predicts **sunset or sunrise** quality (switch in Location mode) with a confidence score and human‑readable explanation
+- **Week outlook**: scores for the next 7 sunsets or sunrises at a glance, best day marked, less certain days faded
+- **"How was it?" follow‑up**: after an alert, a notification asks you to rate the sunset or sunrise you were told about
 - **In‑flight sunrise/sunset prediction**: enter departure/arrival airports and times to find out if you'll catch a sunrise or sunset mid‑flight, which side of the plane to sit on, and how good it will be
 - Airport search across 5,469 worldwide airports (IATA code, city, or name)
 - Find your flight by **number** (e.g. UA2410) or by **route** (from, to, date) via AirLabs timetables, so no times need typing; manual entry stays as a fallback

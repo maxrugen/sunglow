@@ -1,7 +1,16 @@
 import SunCalc from 'suncalc';
 import { evaluate, type WeatherData } from '#lib/server/scoring.js';
-import { airQualityAt, compositeAt, fetchAirQuality, fetchForecast, hourCount, nearestIndex } from '#lib/server/weather.js';
-import { fetchHorizon } from '#lib/server/horizon.js';
+import {
+  airQualityAt,
+  compositeAt,
+  fetchAirQuality,
+  fetchForecast,
+  hourCount,
+  nearestIndex,
+  type AirQuality,
+  type Forecast,
+} from '#lib/server/weather.js';
+import { fetchHorizon, type Horizon } from '#lib/server/horizon.js';
 import { timeZoneAt } from '#lib/server/flight-time.js';
 import { BoundedCache } from '#lib/server/bounded-cache.js';
 import type { SkyEvent } from '#lib/types.js';
@@ -109,6 +118,100 @@ export class PredictionError extends Error {
   }
 }
 
+/** Weather fetched for a location, shared by every event scored from it. */
+export type WeatherSources = { forecast: Forecast; airQuality: AirQuality | null; horizon: Horizon | null };
+
+/**
+ * Score one sunrise or sunset from already-fetched weather: pick the forecast
+ * hour nearest the event, build the composite and evaluate it. Shared by the
+ * single prediction and the multi-day outlook, so both score identically.
+ */
+export function scoreEvent(
+  { forecast, airQuality: aq, horizon }: WeatherSources,
+  at: {
+    latitude: number;
+    longitude: number;
+    event: SkyEvent;
+    day: PredictionPayload['day'];
+    /** UTC epoch seconds to score at; null when the sun doesn't rise or set. */
+    targetSec: number | null;
+    eventSec: number | null;
+    goldenHourSec: number | null;
+  },
+  nowMs = Date.now()
+): PredictionPayload {
+  const { latitude, longitude, event, targetSec } = at;
+  const times = forecast.hourly?.time ?? [];
+  const length = hourCount(forecast);
+  const utcOffsetSeconds = Number(forecast.utc_offset_seconds ?? 0);
+
+  let idx = 0;
+  if (times.length > 0 && targetSec != null) {
+    idx = Math.max(0, nearestIndex(times, targetSec));
+  } else if (length > 0) {
+    // No event to anchor on (polar day/night): use a typical local hour instead.
+    idx = Math.min(POLAR_FALLBACK_HOUR[event], length - 1);
+  }
+
+  const c = compositeAt(forecast, idx);
+  const selectedEpochSec = Number(times[idx]);
+  const airQuality = airQualityAt(aq, selectedEpochSec);
+  // PM2.5 only matters to the model when haze is plausible.
+  const hazeRelevant = (c.visibilityM && c.visibilityM < 12000) || c.humidity > 75;
+
+  let solarAltitudeDeg: number | undefined;
+  try {
+    const sunPos = SunCalc.getPosition(new Date(selectedEpochSec * 1000), latitude, longitude);
+    const deg = (sunPos.altitude * 180) / Math.PI;
+    if (Number.isFinite(deg)) solarAltitudeDeg = deg;
+  } catch {
+    // No solar position (e.g. invalid time): scored without the sun-angle term.
+  }
+
+  const weatherData: PredictionPayload['weatherData'] = {
+    highCloud: c.highCloud,
+    midCloud: c.midCloud,
+    lowCloud: c.lowCloud,
+    humidity: c.humidity,
+    // Unknown AOD (beyond the ~5-day air-quality forecast) scores neutral, like clean air.
+    aod: airQuality.aod ?? 0,
+    solarAltitudeDeg,
+    totalCloud: c.totalCloud,
+    precipitationProbability: c.pop,
+    precipitationMmPerHour: c.precipMm,
+    pressureMslHpa: c.pressure,
+    pressureTrendHpa: c.pressureTrend,
+    windSpeed10mMs: c.windMs,
+    visibilityM: c.visibilityM,
+    temperature2mC: c.tempC,
+    dewPointC: c.dewPointC,
+    dewPointSpreadC: c.dewSpread,
+    pm25UgM3: hazeRelevant ? airQuality.pm25 : undefined,
+    horizonCloud: horizon?.blockingPct,
+    horizonAzimuthDeg: horizon?.azimuthDeg,
+    selectedHourIndex: idx,
+    selectedHour: times[idx],
+  };
+  const alignedToEvent =
+    Number.isFinite(selectedEpochSec) && targetSec != null
+      ? Math.abs(selectedEpochSec - targetSec) <= 1800 // within 30 minutes of the event
+      : false;
+
+  const leadHours = targetSec != null ? Math.max(0, (targetSec * 1000 - nowMs) / 3600_000) : 0;
+  const { score: qualityScore, details, confidence } = evaluate(weatherData, alignedToEvent, leadHours);
+
+  return {
+    event,
+    qualityScore,
+    weatherData,
+    confidence,
+    explanation: { factors: details },
+    day: at.day,
+    timings: { eventEpochSec: at.eventSec, goldenHourEpochSec: at.goldenHourSec },
+    used: { epochSec: selectedEpochSec, latitude, longitude, utcOffsetSeconds },
+  };
+}
+
 /**
  * Fetch weather for a location, select the hour nearest the next sunrise or
  * sunset, and score it. Shared by the /api/predict endpoint, the page's
@@ -144,82 +247,23 @@ export async function predictEvent({
     throw new PredictionError('Failed to fetch weather data', 502);
   }
 
-  const times = forecast.hourly?.time ?? [];
-  const length = hourCount(forecast);
-  const utcOffsetSeconds = Number(forecast.utc_offset_seconds ?? 0);
-
   // Fall back to Open-Meteo's own event time (also a UTC epoch) if SunCalc had none.
   let targetSec = eventSec;
   const apiEvent = Number(forecast.daily?.[event]?.[upcoming.day === 'tomorrow' ? 1 : 0]);
   if (targetSec == null && Number.isFinite(apiEvent)) targetSec = apiEvent;
 
-  let idx = 0;
-  if (times.length > 0 && targetSec != null) {
-    idx = Math.max(0, nearestIndex(times, targetSec));
-  } else if (length > 0) {
-    // No event to anchor on (polar day/night): use a typical local hour instead.
-    idx = Math.min(POLAR_FALLBACK_HOUR[event], length - 1);
-  }
-
-  const c = compositeAt(forecast, idx);
-  const selectedEpochSec = Number(times[idx]);
-  const airQuality = airQualityAt(aq, selectedEpochSec);
-  // PM2.5 only matters to the model when haze is plausible.
-  const hazeRelevant = (c.visibilityM && c.visibilityM < 12000) || c.humidity > 75;
-
-  let solarAltitudeDeg: number | undefined;
-  try {
-    const sunPos = SunCalc.getPosition(new Date(selectedEpochSec * 1000), latitude, longitude);
-    const deg = (sunPos.altitude * 180) / Math.PI;
-    if (Number.isFinite(deg)) solarAltitudeDeg = deg;
-  } catch {
-    // No solar position (e.g. invalid time): scored without the sun-angle term.
-  }
-
-  const weatherData: PredictionPayload['weatherData'] = {
-    highCloud: c.highCloud,
-    midCloud: c.midCloud,
-    lowCloud: c.lowCloud,
-    humidity: c.humidity,
-    aod: airQuality.aod ?? 0,
-    solarAltitudeDeg,
-    totalCloud: c.totalCloud,
-    precipitationProbability: c.pop,
-    precipitationMmPerHour: c.precipMm,
-    pressureMslHpa: c.pressure,
-    pressureTrendHpa: c.pressureTrend,
-    windSpeed10mMs: c.windMs,
-    visibilityM: c.visibilityM,
-    temperature2mC: c.tempC,
-    dewPointC: c.dewPointC,
-    dewPointSpreadC: c.dewSpread,
-    pm25UgM3: hazeRelevant ? airQuality.pm25 : undefined,
-    horizonCloud: horizon?.blockingPct,
-    horizonAzimuthDeg: horizon?.azimuthDeg,
-    selectedHourIndex: idx,
-    selectedHour: times[idx],
-  };
-  const alignedToEvent =
-    Number.isFinite(selectedEpochSec) && targetSec != null
-      ? Math.abs(selectedEpochSec - targetSec) <= 1800 // within 30 minutes of the event
-      : false;
-
-  const leadHours = targetSec != null ? Math.max(0, (targetSec * 1000 - Date.now()) / 3600_000) : 0;
-  const { score: qualityScore, details, confidence } = evaluate(weatherData, alignedToEvent, leadHours);
-
-  const payload: PredictionPayload = {
-    event,
-    qualityScore,
-    weatherData,
-    confidence,
-    explanation: { factors: details },
-    day: upcoming.day,
-    timings: {
-      eventEpochSec: eventSec,
-      goldenHourEpochSec: upcoming.goldenHour ? Math.floor(upcoming.goldenHour.getTime() / 1000) : null,
-    },
-    used: { epochSec: selectedEpochSec, latitude, longitude, utcOffsetSeconds },
-  };
+  const payload = scoreEvent(
+    { forecast, airQuality: aq, horizon },
+    {
+      latitude,
+      longitude,
+      event,
+      day: upcoming.day,
+      targetSec,
+      eventSec,
+      goldenHourSec: upcoming.goldenHour ? Math.floor(upcoming.goldenHour.getTime() / 1000) : null,
+    }
+  );
 
   responseCache.set(cacheKey, payload);
   return payload;

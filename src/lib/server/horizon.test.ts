@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import SunCalc from 'suncalc';
-import { destinationPoint, fetchHorizon, horizonBlocking, sunAzimuth } from './horizon';
+import { destinationPoint, fetchHorizon, fetchHorizons, horizonBlocking, sunAzimuth } from './horizon';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -72,5 +72,38 @@ describe('fetchHorizon()', () => {
   it('returns null when the request fails', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 400 })));
     expect(await fetchHorizon(52.52, 13.4, sunset)).toBeNull();
+  });
+});
+
+describe('fetchHorizons()', () => {
+  it('samples several events in one request, each toward its own sun direction', async () => {
+    const day1 = new Date('2026-10-16T16:10:00Z');
+    const day7 = new Date('2026-10-22T15:58:00Z');
+    const hours = (d: Date) => [Math.floor(d.getTime() / 3600_000) * 3600, Math.floor(d.getTime() / 3600_000) * 3600 + 3600];
+    const time = [...hours(day1), ...hours(day7)];
+    // Day 1 clear, day 7 blocked; the last point of day 7 has no data.
+    const location = (low: number | null) => ({ hourly: { time, cloudcover_low: time.map(() => low), cloudcover_mid: time.map(() => 0) } });
+    const body = [location(0), location(0), location(0), location(90), location(90), location(90)];
+    const fetchMock = vi.fn(async (_url: string) => new Response(JSON.stringify(body), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const [first, last] = await fetchHorizons(52.52, 13.4, [day1, day7]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(new URL(String(fetchMock.mock.calls[0][0])).searchParams.get('latitude')!.split(',')).toHaveLength(6);
+    expect(first?.blockingPct).toBeCloseTo(0);
+    expect(last?.blockingPct).toBeCloseTo(90);
+    // The sunset direction moves south through October.
+    expect(last!.azimuthDeg).toBeLessThan(first!.azimuthDeg);
+
+    body[5] = location(null);
+    const [stillFine, missing] = await fetchHorizons(52.52, 13.4, [day1, day7]);
+    expect(stillFine?.blockingPct).toBeCloseTo(0);
+    expect(missing).toBeNull();
+  });
+
+  it('returns nulls without events or when the request fails', async () => {
+    expect(await fetchHorizons(52.52, 13.4, [])).toEqual([]);
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 500 })));
+    expect(await fetchHorizons(52.52, 13.4, [new Date(), new Date()])).toEqual([null, null]);
   });
 });

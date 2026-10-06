@@ -291,10 +291,18 @@ describe('aerosols', () => {
 });
 
 describe('confidence lead time', () => {
-  it('drops slowly with how far ahead the event is, by at most 15', () => {
+  it('drops slowly over the first two days, by at most 15', () => {
     const w = baseWeather();
     expect(calculateConfidence(w, true, 0)).toBe(90);
     expect(calculateConfidence(w, true, 10)).toBe(87);
-    expect(calculateConfidence(w, true, 200)).toBe(75);
+    expect(calculateConfidence(w, true, 45)).toBe(75);
+    expect(calculateConfidence(w, true, 48)).toBe(75);
+  });
+
+  it('keeps dropping over the rest of the week, by at most 35 in total', () => {
+    const w = baseWeather();
+    expect(calculateConfidence(w, true, 72)).toBe(71); // day 3
+    expect(calculateConfidence(w, true, 144)).toBe(59); // day 6
+    expect(calculateConfidence(w, true, 400)).toBe(55);
   });
 });
