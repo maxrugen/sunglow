@@ -7,6 +7,8 @@ import {
   bestSunsetWaypoint,
   computeSunSide
 } from '$lib/server/flight-route';
+import { fetchWithRetry, fetchAirQuality, airQualityAt } from '$lib/server/prediction';
+import { resolveFlightTimes, timeZoneAt } from '$lib/server/flight-time';
 import airportsData from '$lib/data/airports.json';
 import type { RequestHandler } from './$types';
 import type { Airport, FlightPredictionResponse, SunsetWaypoint } from '$lib/types';
@@ -23,31 +25,11 @@ for (const a of airports) {
 const cache = new Map<string, { ts: number; payload: FlightPredictionResponse }>();
 const CACHE_TTL_MS = 10 * 60 * 1000;
 
-async function fetchWithRetry(url: string, retries = 2, timeoutMs = 8000): Promise<Response> {
-  let attempt = 0;
-  while (true) {
-    const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      const res = await fetch(url, { signal: controller.signal });
-      clearTimeout(id);
-      if (!res.ok && attempt < retries) {
-        attempt++;
-        await new Promise(r => setTimeout(r, 300 * Math.pow(2, attempt)));
-        continue;
-      }
-      return res;
-    } catch (e) {
-      clearTimeout(id);
-      if (attempt < retries) {
-        attempt++;
-        await new Promise(r => setTimeout(r, 300 * Math.pow(2, attempt)));
-        continue;
-      }
-      throw e;
-    }
-  }
-}
+const DAY_MS = 24 * 60 * 60 * 1000;
+/** Open-Meteo's forecast horizon. */
+const MAX_FORECAST_DAYS = 16;
+/** Beyond this lead time, forecasts degrade enough to lower confidence. */
+const RELIABLE_LEAD_DAYS = 3;
 
 function computeDewPoint(tempC: number, rh: number): number {
   const a = 17.27;
@@ -58,45 +40,44 @@ function computeDewPoint(tempC: number, rh: number): number {
 
 /**
  * Fetch weather data from Open-Meteo for a specific lat/lon, selecting the
- * hourly index closest to `targetEpochMs`.
+ * hourly index closest to `targetEpochMs`. Returns null when the time is
+ * outside the forecast window or the fetch fails.
  */
 async function fetchWeatherAtPoint(lat: number, lon: number, targetEpochMs: number) {
+  const daysAhead = Math.ceil((targetEpochMs - Date.now()) / DAY_MS);
+  if (daysAhead < 0 || daysAhead >= MAX_FORECAST_DAYS) return null;
+
   const params = new URLSearchParams({
     latitude: String(lat),
     longitude: String(lon),
     hourly: 'relativehumidity_2m,temperature_2m,cloudcover_low,cloudcover_mid,cloudcover_high,cloudcover,precipitation_probability,precipitation,pressure_msl,windspeed_10m,visibility',
-    forecast_days: '3',
+    // +1 because the window starts at local midnight today.
+    forecast_days: String(Math.min(MAX_FORECAST_DAYS, daysAhead + 1)),
     timezone: 'auto',
     timeformat: 'unixtime'
   });
 
-  // Try with daily AOD
-  let data: any;
-  const urlWithDaily = `https://api.open-meteo.com/v1/forecast?${params.toString()}&daily=aerosol_optical_depth`;
-  const res = await fetchWithRetry(urlWithDaily, 1, 8000);
-  if (res.ok) {
-    data = await res.json();
-  } else {
-    const res2 = await fetchWithRetry(`https://api.open-meteo.com/v1/forecast?${params.toString()}`, 1, 8000);
-    if (!res2.ok) return null;
-    data = await res2.json();
-  }
+  const [res, aq] = await Promise.all([
+    fetchWithRetry(`https://api.open-meteo.com/v1/forecast?${params.toString()}`, {}, 1, 8000),
+    fetchAirQuality(lat, lon)
+  ]);
+  if (!res.ok) return null;
+  const data: any = await res.json();
 
   const hourly = data?.hourly ?? {};
-  const daily = data?.daily ?? {};
   const times: number[] = hourly?.time ?? [];
-  const utcOffsetSeconds = Number(data?.utc_offset_seconds ?? 0);
-
   if (times.length === 0) return null;
 
-  // Find closest hourly index to target time
-  const targetSec = Math.floor(targetEpochMs / 1000) + utcOffsetSeconds;
+  // unixtime values are UTC epochs, so compare against the UTC target directly.
+  const targetSec = Math.floor(targetEpochMs / 1000);
   let idx = 0;
   let bestDiff = Infinity;
   for (let i = 0; i < times.length; i++) {
     const diff = Math.abs(Number(times[i]) - targetSec);
     if (diff < bestDiff) { bestDiff = diff; idx = i; }
   }
+  // Nearest hour is far off: the target is outside what was returned.
+  if (bestDiff > 3600) return null;
 
   const length = times.length;
 
@@ -133,7 +114,7 @@ async function fetchWeatherAtPoint(lat: number, lon: number, targetEpochMs: numb
   const dewpointC = computeDewPoint(composite.tempC, composite.humidity);
   const dewSpread = composite.tempC - dewpointC;
 
-  const aod = Number(daily?.aerosol_optical_depth?.[0] ?? 0);
+  const { aod } = airQualityAt(aq, Number(times[idx]));
 
   // Solar altitude at the target time
   let solarAltitudeDeg: number | undefined;
@@ -147,7 +128,7 @@ async function fetchWeatherAtPoint(lat: number, lon: number, targetEpochMs: numb
     midCloud: composite.midCloud,
     lowCloud: composite.lowCloud,
     humidity: composite.humidity,
-    aod,
+    aod: aod ?? 0,
     solarAltitudeDeg,
     totalCloud: composite.totalCloud,
     precipitationProbability: composite.pop,
@@ -181,12 +162,17 @@ export const POST: RequestHandler = async ({ request }) => {
       return json({ error: `Unknown arrival airport: ${arrIata}` }, { status: 400 });
     }
 
-    const depTimeMs = new Date(depTimeStr).getTime();
-    const arrTimeMs = new Date(arrTimeStr).getTime();
-
-    if (!Number.isFinite(depTimeMs) || !Number.isFinite(arrTimeMs)) {
+    // Wall-clock times are local to each airport; see resolveFlightTimes().
+    const resolved = resolveFlightTimes(
+      depTimeStr,
+      arrTimeStr,
+      timeZoneAt(depAirport.lat, depAirport.lon),
+      timeZoneAt(arrAirport.lat, arrAirport.lon)
+    );
+    if (!resolved) {
       return json({ error: 'Invalid departure or arrival time.' }, { status: 400 });
     }
+    const { depMs: depTimeMs, arrMs: arrTimeMs } = resolved;
 
     if (arrTimeMs <= depTimeMs) {
       return json({ error: 'Arrival time must be after departure time.' }, { status: 400 });
@@ -222,8 +208,8 @@ export const POST: RequestHandler = async ({ request }) => {
         route: {
           departure: { iata: depIata, name: depAirport.name, lat: depAirport.lat, lon: depAirport.lon },
           arrival: { iata: arrIata, name: arrAirport.name, lat: arrAirport.lat, lon: arrAirport.lon },
-          departureTime: depTimeStr,
-          arrivalTime: arrTimeStr,
+          departureTime: new Date(depTimeMs).toISOString(),
+          arrivalTime: new Date(arrTimeMs).toISOString(),
         }
       };
       cache.set(cacheKey, { ts: Date.now(), payload });
@@ -236,20 +222,18 @@ export const POST: RequestHandler = async ({ request }) => {
     // Fetch weather for the best waypoint
     const weather = await fetchWeatherAtPoint(best.lat, best.lon, best.sunsetTime);
 
-    let qualityScore = 0;
-    let confidence = 0;
+    let qualityScore: number | undefined;
+    let confidence: number | undefined;
     let explanation: { factors?: Record<string, unknown> } = {};
 
     if (weather) {
       const alignedToSunset = best.offsetMinutes <= 30;
       const result = evaluateInFlight(weather, alignedToSunset);
+      const leadDays = (best.sunsetTime - Date.now()) / DAY_MS;
+      const leadPenalty = Math.min(30, Math.max(0, Math.round((leadDays - RELIABLE_LEAD_DAYS) * 5)));
       qualityScore = result.score;
-      confidence = result.confidence;
+      confidence = Math.max(0, result.confidence - leadPenalty);
       explanation = { factors: result.details };
-    } else {
-      qualityScore = 50; // default mid-range if weather unavailable
-      confidence = 20;
-      explanation = { factors: { note: 'Weather data unavailable for this location/time.' } };
     }
 
     // Compute seat side
@@ -268,9 +252,9 @@ export const POST: RequestHandler = async ({ request }) => {
     const sunsetLocation = `${Math.abs(best.lat).toFixed(1)}°${latDir}, ${Math.abs(best.lon).toFixed(1)}°${lonDir}`;
 
     // Score all sunset waypoints (for advanced display)
-    const scoredWaypoints: Array<SunsetWaypoint & { score: number }> = sunsetWaypoints.map(wp => ({
+    const scoredWaypoints: Array<SunsetWaypoint & { score?: number }> = sunsetWaypoints.map(wp => ({
       ...wp,
-      score: wp === best ? qualityScore : 0 // only scored the best one
+      score: wp === best ? qualityScore : undefined // only the best one is scored
     }));
 
     const payload: FlightPredictionResponse = {
@@ -287,8 +271,8 @@ export const POST: RequestHandler = async ({ request }) => {
       route: {
         departure: { iata: depIata, name: depAirport.name, lat: depAirport.lat, lon: depAirport.lon },
         arrival: { iata: arrIata, name: arrAirport.name, lat: arrAirport.lat, lon: arrAirport.lon },
-        departureTime: depTimeStr,
-        arrivalTime: arrTimeStr,
+        departureTime: new Date(depTimeMs).toISOString(),
+        arrivalTime: new Date(arrTimeMs).toISOString(),
       }
     };
 

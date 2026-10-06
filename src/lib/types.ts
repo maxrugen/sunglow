@@ -7,7 +7,7 @@ export type PredictionResponse = {
   confidence?: number;
   explanation?: { factors?: Record<string, unknown> };
   weatherData?: Partial<WeatherData>;
-  used?: { epochSecLocal?: number; latitude?: number; longitude?: number };
+  used?: { epochSec?: number; latitude?: number; longitude?: number };
 };
 
 export type ClientPrediction = {
@@ -15,7 +15,7 @@ export type ClientPrediction = {
   confidence?: number;
   explanation?: { factors?: Record<string, unknown> };
   timings: { sunset: Date | null; goldenHour: Date | null };
-  used?: { epochSecLocal?: number; latitude?: number; longitude?: number };
+  used?: { epochSec?: number; latitude?: number; longitude?: number };
 };
 
 // Flight sunset prediction types
@@ -27,7 +27,6 @@ export type Airport = {
   country: string;
   lat: number;
   lon: number;
-  timezone: string;
 };
 
 export type FlightWaypoint = {
@@ -64,8 +63,8 @@ export type FlightPredictionResponse = {
   sunsetTimeUTC?: string;
   /** Description of where sunset occurs (lat/lon label) */
   sunsetLocation?: string;
-  /** All scored waypoints for advanced display */
-  scoredWaypoints?: Array<SunsetWaypoint & { score: number }>;
+  /** All sunset waypoints; only the best one carries a score */
+  scoredWaypoints?: Array<SunsetWaypoint & { score?: number }>;
   /** Message when no sunset is expected */
   message?: string;
   /** Flight route summary */

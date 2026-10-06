@@ -3,13 +3,15 @@
 Sunset Quality Prediction web app built with SvelteKit and TypeScript. It estimates how good tonight's sunset will be for a given location using weather data, solar geometry, and a heuristic scoring model. It can also predict whether you'll see a sunset during a flight and which side of the plane to sit on.
 
 ### Features
-- Predicts sunset quality with a confidence score and human‑readable explanation- **In‑flight sunset prediction**: enter departure/arrival airports and times to find out if you'll catch a sunset mid‑flight, which side of the plane to sit on, and how good it will be
+- Predicts sunset quality with a confidence score and human‑readable explanation
+- **In‑flight sunset prediction**: enter departure/arrival airports and times to find out if you'll catch a sunset mid‑flight, which side of the plane to sit on, and how good it will be
 - Airport search across 5,469 worldwide airports (IATA code, city, or name)
 - Optional flight number lookup via AviationStack API
 - Great‑circle route interpolation with sunset window detection along the flight path
 - Seat side recommendation based on sun azimuth vs. plane heading
-- Adapted in‑flight scoring model (cloud‑top views as bonus, reduced surface penalties)- Uses actual sunset time (SunCalc), aligned to the location’s timezone
-- Serverless API using Open‑Meteo (hourly weather + optional air quality)
+- Adapted in‑flight scoring model (cloud‑top views as bonus, reduced surface penalties)
+- Uses actual sunset time (SunCalc) to pick the forecast hour
+- Serverless API using Open‑Meteo (hourly weather + air quality for aerosols/PM2.5)
 - In‑memory caching keyed by (lat, lon, date, hour)
 - Robust fetches with short timeouts and retries
 - Accessible, keyboard‑friendly search with debounced queries and aria‑live announcements
@@ -72,9 +74,8 @@ npm run test:watch # watch mode
 1) User enters a city or uses "Use My Location".
 2) The app reverse geocodes to a label if needed, then POSTs coordinates to the prediction API.
 3) The server:
-   - Fetches hourly weather (unixtime) from Open‑Meteo
-   - Derives the correct "used hour" by proximity to the local sunset epoch
-   - Optionally fetches PM2.5 (air quality) when relevant
+   - Fetches hourly weather and air quality (AOD, PM2.5) from Open‑Meteo in parallel
+   - Picks the hour closest to the actual sunset (all timestamps are UTC epochs)
    - Computes score and confidence using `evaluate` in `src/lib/server/scoring.ts`
    - Caches the response in memory keyed by `(lat,lon,date,hour)`
 4) The client computes sunset/golden‑hour times with SunCalc and renders results.
@@ -129,7 +130,7 @@ Response (shape abbreviated):
   "confidence": 0-100,
   "explanation": { "factors": { /* human-readable factor details */ } },
   "used": {
-    "epochSecLocal": 1730000000,
+    "epochSec": 1730000000, // UTC epoch of the scored hour
     "latitude": 52.52,
     "longitude": 13.405
   }
@@ -137,10 +138,10 @@ Response (shape abbreviated):
 ```
 
 Notes:
-- Uses `timeformat=unixtime` to avoid DST/string parsing issues; selects the hourly index nearest local sunset epoch.
-- Caches responses in memory (`Map`) with TTL. Cache key includes hour: `(lat,lon,day,hour)`.
+- Uses `timeformat=unixtime`; these timestamps are UTC epochs, so the hour nearest the UTC sunset instant is selected.
+- Caches responses in memory (`Map`) with TTL, checked before any upstream fetch. Cache key: `(lat,lon,sunset hour)`.
 - Adds `Cache-Control: public, max-age=120` to responses.
-- Retries external fetches with short timeouts.
+- Retries external fetches with short timeouts (server errors and rate limits only).
 
 #### Geocoding
 `GET /api/geocode?q=Berlin` → Open‑Meteo Geocoding proxy
@@ -156,10 +157,12 @@ Request body:
 {
   "depIata": "MUC",
   "arrIata": "DRS",
-  "depTime": "2026-04-12T17:00:00Z",
-  "arrTime": "2026-04-12T18:00:00Z"
+  "depTime": "2026-04-12T17:00",
+  "arrTime": "2026-04-12T18:00"
 }
 ```
+
+Times without an offset are local wall‑clock times at each airport (as printed on a ticket); the arrival date is resolved to the first matching local time after departure, so overnight flights and date‑line crossings need no special handling. Times with an explicit offset (e.g. `Z`) are used as‑is. Weather is only available up to 16 days ahead; beyond that the response omits `qualityScore` and `confidence` but still includes the seat recommendation.
 
 Response (shape abbreviated):
 ```json

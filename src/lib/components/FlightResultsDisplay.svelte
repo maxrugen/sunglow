@@ -65,10 +65,15 @@
 
 <section class="card">
     {#if prediction && prediction.sunsetDuringFlight}
-        <h2>
-            In-Flight Sunset: <span class="accent">{score}%</span>
-            <small class="badge">{description}</small>
-        </h2>
+        {#if prediction.qualityScore != null}
+            <h2>
+                In-Flight Sunset: <span class="accent">{score}%</span>
+                <small class="badge">{description}</small>
+            </h2>
+        {:else}
+            <h2>Sunset During Your Flight</h2>
+            <p class="message">No weather forecast is available for this date yet, so there is no quality score. The seat recommendation is still valid.</p>
+        {/if}
 
         {#if prediction.route}
             <p class="route">

@@ -107,7 +107,7 @@
             <p>{buildExplanation(prediction)}</p>
             {#if prediction?.used}
                 <p class="used">
-                    Used time: {new Date((prediction.used.epochSecLocal || 0) * 1000).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' })}
+                    Used time: {new Date((prediction.used.epochSec || 0) * 1000).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' })}
                     {#if (() => { const fx:any = prediction?.explanation?.factors as any; return typeof fx?.solarAltitude?.deg === 'number'; })()}
                         · Solar altitude: {(() => { const fx:any = prediction?.explanation?.factors as any; return Math.round(fx.solarAltitude.deg); })()}°
                     {:else}

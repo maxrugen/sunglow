@@ -9,9 +9,14 @@
 
     const airports: Airport[] = airportsData as Airport[];
 
+    /** Today's date in the browser's zone as YYYY-MM-DD (toISOString would give the UTC date). */
+    function localDateString(d = new Date()): string {
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }
+
     // Flight number lookup state
     let flightCode: string = '';
-    let flightDate: string = new Date().toISOString().slice(0, 10);
+    let flightDate: string = localDateString();
     let isLookingUp: boolean = false;
     let lookupAvailable: boolean = false;
 
@@ -39,7 +44,7 @@
     let arrRootEl: HTMLDivElement;
 
     // Default date: today
-    let dateStr: string = new Date().toISOString().slice(0, 10);
+    let dateStr: string = localDateString();
 
     function searchAirport(query: string): Airport[] {
         const q = query.trim().toUpperCase();
@@ -128,14 +133,14 @@
             if (depAp) selectDep(depAp);
             if (arrAp) selectArr(arrAp);
 
+            // AviationStack's scheduled times are airport-local despite the "+00:00"
+            // suffix, so take the wall-clock part as-is instead of parsing it.
             if (data.departure?.scheduled) {
-                const d = new Date(data.departure.scheduled);
-                depTime = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+                depTime = data.departure.scheduled.slice(11, 16);
                 dateStr = data.departure.scheduled.slice(0, 10);
             }
             if (data.arrival?.scheduled) {
-                const d = new Date(data.arrival.scheduled);
-                arrTime = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+                arrTime = data.arrival.scheduled.slice(11, 16);
             }
         } catch {
             errorMessage = 'Flight lookup failed. Please enter details manually.';
@@ -151,21 +156,13 @@
         if (!depTime) { errorMessage = 'Enter departure time.'; return; }
         if (!arrTime) { errorMessage = 'Enter arrival time.'; return; }
 
-        const depISO = `${dateStr}T${depTime}:00`;
-        let arrISO = `${dateStr}T${arrTime}:00`;
-
-        // If arrival time is before departure, assume next day
-        if (arrTime <= depTime) {
-            const nextDay = new Date(new Date(dateStr).getTime() + 86400000);
-            const nd = nextDay.toISOString().slice(0, 10);
-            arrISO = `${nd}T${arrTime}:00`;
-        }
-
+        // Wall-clock times without an offset: the server reads each one in its
+        // airport's time zone and picks the arrival date (overnight, date line).
         dispatch('flightSubmit', {
             depIata: selectedDep.iata,
             arrIata: selectedArr.iata,
-            depTime: depISO,
-            arrTime: arrISO,
+            depTime: `${dateStr}T${depTime}:00`,
+            arrTime: `${dateStr}T${arrTime}:00`,
         });
     }
 </script>
@@ -241,7 +238,7 @@
 
         <div class="time-row">
             <div class="field">
-                <label class="field-label" for="date-input">Date</label>
+                <label class="field-label" for="date-input">Departure date</label>
                 <input id="date-input" type="date" bind:value={dateStr} />
             </div>
             <div class="field">
@@ -253,6 +250,7 @@
                 <input id="arr-time" type="time" bind:value={arrTime} />
             </div>
         </div>
+        <p class="time-hint">Enter local times at each airport, as shown on your ticket.</p>
     </div>
 
     {#if errorMessage}
@@ -274,6 +272,7 @@
     .fields { display: flex; flex-direction: column; gap: 1rem; }
     .field { position: relative; }
     .field-label { display: block; font-size: 0.85rem; margin-bottom: 0.35rem; opacity: 0.9; }
+    .time-hint { margin: 0; font-size: 0.8rem; opacity: 0.75; }
     .time-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.75rem; }
     .lookup-section { display: flex; flex-direction: column; gap: 0.35rem; }
     .lookup-row { display: flex; gap: 0.5rem; }
