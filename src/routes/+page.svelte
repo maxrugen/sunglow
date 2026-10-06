@@ -4,10 +4,12 @@
     import PushSubscribeButton from '$lib/components/PushSubscribeButton.svelte';
     import FlightInput from '$lib/components/FlightInput.svelte';
     import FlightResultsDisplay from '$lib/components/FlightResultsDisplay.svelte';
+    import { onMount } from 'svelte';
     import type { ClientPrediction, FlightPredictionResponse } from '$lib/types';
+    import type { PageData } from './$types';
     let SunCalcPromise: Promise<any> | null = null;
 
-    export let data: any;
+    export let data: PageData;
 
     let mode: 'location' | 'flight' = 'location';
 
@@ -123,6 +125,25 @@
         root.style.setProperty('--text-accent', '#ffffff');
     }
     // Note: we no longer auto-load the last location on mount so that a reload returns to the search view.
+
+    // Deep links (?lat=&lon=&label=, e.g. from push notifications) arrive server-rendered.
+    if (data.ssr) {
+        location = { latitude: data.ssr.latitude, longitude: data.ssr.longitude };
+        locationLabel = data.ssr.label;
+        predictionData = {
+            qualityScore: data.ssr.qualityScore,
+            confidence: data.ssr.confidence,
+            explanation: data.ssr.explanation,
+            timings: data.ssr.timings,
+            used: data.ssr.used
+        };
+    }
+
+    onMount(() => {
+        if (!data.ssr) return;
+        updateTheme(data.ssr.qualityScore);
+        try { localStorage.setItem('sunglow:last', JSON.stringify({ latitude: data.ssr.latitude, longitude: data.ssr.longitude, label: locationLabel })); } catch {}
+    });
 
     function switchMode(target: 'location' | 'flight') {
         mode = target;
@@ -259,23 +280,3 @@
     .loader { opacity: 0.9; }
     .error { color: #ffd3d3; }
 </style>
-
-{#if !predictionData && data?.ssr}
-    <script>
-        // hydrate preloaded SSR result after first paint
-        location = { latitude: data.ssr.latitude, longitude: data.ssr.longitude };
-        locationLabel = data.ssr.label || '';
-        predictionData = { qualityScore: data.ssr.qualityScore, confidence: data.ssr.confidence, timings: { sunset: null, goldenHour: null } };
-        // compute times lazily on client
-        (async () => {
-            if (!SunCalcPromise) SunCalcPromise = import('suncalc');
-            const { default: SunCalc } = await SunCalcPromise;
-            const times = SunCalc.getTimes(new Date(), data.ssr.latitude, data.ssr.longitude);
-            predictionData = { ...predictionData, timings: { sunset: times.sunset, goldenHour: times.goldenHour } };
-            updateTheme(predictionData.qualityScore);
-            try { localStorage.setItem('sunglow:last', JSON.stringify({ latitude: data.ssr.latitude, longitude: data.ssr.longitude, label: locationLabel })); } catch {}
-        })();
-    </script>
-{/if}
-
-

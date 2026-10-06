@@ -9,7 +9,8 @@ export interface PredictionPayload {
   confidence: number;
   explanation: { factors: unknown };
   used: {
-    epochSecLocal: number;
+    /** UTC epoch seconds of the scored hour. */
+    epochSec: number;
     latitude: number;
     longitude: number;
     utcOffsetSeconds: number;
@@ -28,6 +29,13 @@ export function fetchWithRetry(
   timeoutMs?: number,
   backoffBaseMs?: number
 ): Promise<Response>;
+
+export function fetchAirQuality(latitude: number, longitude: number): Promise<unknown | null>;
+
+export function airQualityAt(
+  aq: unknown,
+  targetSec: number
+): { aod: number | undefined; pm25: number | undefined };
 
 export function predictSunset(coords: {
   latitude: number;

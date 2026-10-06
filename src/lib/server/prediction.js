@@ -1,24 +1,38 @@
 import SunCalc from 'suncalc';
 import { evaluate } from '$lib/server/scoring';
 
-// Simple in-memory cache (ephemeral in serverless environments)
-// Keyed by lat,lon,yyyy-mm-dd,hour
+// Simple in-memory cache (ephemeral in serverless environments), keyed by
+// rounded coordinates + the sunset hour, so repeat lookups skip the upstream fetches.
 const responseCache = new Map();
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+const CACHE_MAX_ENTRIES = 500;
 
-function getCacheKey(lat, lon) {
-    const now = new Date();
-    const y = now.getFullYear();
-    const m = String(now.getMonth() + 1).padStart(2, '0');
-    const d = String(now.getDate()).padStart(2, '0');
-    const day = `${y}-${m}-${d}`;
-    return `${lat.toFixed(3)},${lon.toFixed(3)},${day}`;
+function getCacheKey(lat, lon, sunsetEpochSec) {
+    const bucket = Number.isFinite(sunsetEpochSec)
+        ? `h:${Math.floor(sunsetEpochSec / 3600)}`
+        : `d:${new Date().toISOString().slice(0, 10)}`;
+    return `${lat.toFixed(3)},${lon.toFixed(3)},${bucket}`;
 }
 
-function getCacheKeyWithHour(lat, lon, epochSecLocal) {
-    const dayKey = getCacheKey(lat, lon);
-    const hourKey = Number.isFinite(epochSecLocal) ? Math.floor(epochSecLocal / 3600) : 'na';
-    return `${dayKey},h:${hourKey}`;
+function cacheSet(key, payload) {
+    if (responseCache.size >= CACHE_MAX_ENTRIES) {
+        // Maps iterate in insertion order, so the first key is the oldest.
+        responseCache.delete(responseCache.keys().next().value);
+    }
+    responseCache.set(key, { ts: Date.now(), payload });
+}
+
+/** Index of the entry in `epochs` closest to `targetSec`, or -1 if none is finite. */
+function nearestIndex(epochs, targetSec) {
+    let bestI = -1;
+    let bestDiff = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < epochs.length; i++) {
+        const e = Number(epochs[i]);
+        if (!Number.isFinite(e)) continue;
+        const diff = Math.abs(e - targetSec);
+        if (diff < bestDiff) { bestDiff = diff; bestI = i; }
+    }
+    return bestI;
 }
 
 export async function fetchWithRetry(url, options = {}, retries = 3, timeoutMs = 6000, backoffBaseMs = 300) {
@@ -29,7 +43,9 @@ export async function fetchWithRetry(url, options = {}, retries = 3, timeoutMs =
         try {
             const res = await fetch(url, { ...options, signal: controller.signal });
             clearTimeout(id);
-            if (!res.ok && attempt < retries) {
+            // Client errors (except rate limiting) won't succeed on retry.
+            const retryable = res.status >= 500 || res.status === 429;
+            if (!res.ok && retryable && attempt < retries) {
                 attempt++;
                 const jitter = Math.random() * 100;
                 const delay = Math.min(2000, backoffBaseMs * Math.pow(2, attempt)) + jitter;
@@ -52,6 +68,40 @@ export async function fetchWithRetry(url, options = {}, retries = 3, timeoutMs =
 }
 
 /**
+ * Hourly aerosol optical depth and PM2.5 from the Open-Meteo air-quality API.
+ * The forecast API has no AOD variable, so this is the only source for it.
+ * Resolves to null on any failure, since both values are optional for scoring.
+ */
+export async function fetchAirQuality(latitude, longitude) {
+    try {
+        const params = new URLSearchParams({
+            latitude: String(latitude),
+            longitude: String(longitude),
+            hourly: 'aerosol_optical_depth,pm2_5',
+            forecast_days: '5',
+            timeformat: 'unixtime'
+        });
+        const res = await fetchWithRetry(`https://air-quality-api.open-meteo.com/v1/air-quality?${params.toString()}`, {}, 1, 6000);
+        if (!res.ok) return null;
+        return await res.json();
+    } catch {
+        return null;
+    }
+}
+
+/** AOD and PM2.5 at the hour nearest `targetSec` (UTC epoch seconds). */
+export function airQualityAt(aq, targetSec) {
+    const i = nearestIndex(aq?.hourly?.time ?? [], targetSec);
+    if (i < 0) return { aod: undefined, pm25: undefined };
+    const aod = Number(aq.hourly.aerosol_optical_depth?.[i]);
+    const pm25 = Number(aq.hourly.pm2_5?.[i]);
+    return {
+        aod: Number.isFinite(aod) ? aod : undefined,
+        pm25: Number.isFinite(pm25) ? pm25 : undefined
+    };
+}
+
+/**
  * Thrown when the upstream weather fetch fails. Carries an HTTP status so the
  * route can translate it into the same 502 response the endpoint used to send.
  */
@@ -65,43 +115,47 @@ export class PredictionError extends Error {
 
 /**
  * Fetch weather for a location, select the hour nearest sunset, and score it.
- * Returns the same payload shape the /api/predict endpoint has always returned,
- * so it can be reused by both the endpoint and the notification cron.
+ * Shared by the /api/predict endpoint and the notification cron.
+ *
+ * Open-Meteo's `timeformat=unixtime` values are true UTC epochs, so hours are
+ * matched against the UTC sunset instant directly.
  *
  * @param {{ latitude: number, longitude: number }} coords
  */
 export async function predictSunset({ latitude, longitude }) {
-    const baseParams = {
+    let sunsetSec = null;
+    try {
+        const sunTimes = SunCalc.getTimes(new Date(), latitude, longitude);
+        if (sunTimes && sunTimes.sunset instanceof Date && !isNaN(sunTimes.sunset.getTime())) {
+            sunsetSec = Math.floor(sunTimes.sunset.getTime() / 1000);
+        }
+    } catch {}
+
+    const cacheKey = getCacheKey(latitude, longitude, sunsetSec);
+    const cached = responseCache.get(cacheKey);
+    if (cached && Date.now() - cached.ts < CACHE_TTL_MS) {
+        return cached.payload;
+    }
+
+    const params = new URLSearchParams({
         latitude: String(latitude),
         longitude: String(longitude),
         hourly: 'relativehumidity_2m,temperature_2m,cloudcover_low,cloudcover_mid,cloudcover_high,cloudcover,precipitation_probability,precipitation,pressure_msl,windspeed_10m,visibility',
+        daily: 'sunset',
         forecast_days: '1',
         timezone: 'auto',
         timeformat: 'unixtime'
-    };
-
-    // Attempt with daily AOD first (may not be supported in all datasets)
-    let data;
-    {
-        const params = new URLSearchParams({ ...baseParams, daily: 'aerosol_optical_depth,sunset' });
-        const url = `https://api.open-meteo.com/v1/forecast?${params.toString()}`;
-        const res = await fetchWithRetry(url, {}, 1, 8000);
-        if (res.ok) {
-            data = await res.json();
-        } else {
-            // Fallback without daily param
-            const paramsNoDaily = new URLSearchParams(baseParams);
-            const urlNoDaily = `https://api.open-meteo.com/v1/forecast?${paramsNoDaily.toString()}`;
-            const res2 = await fetchWithRetry(urlNoDaily, {}, 1, 8000);
-            if (!res2.ok) {
-                throw new PredictionError('Failed to fetch weather data', 502);
-            }
-            data = await res2.json();
-        }
+    });
+    const [res, aq] = await Promise.all([
+        fetchWithRetry(`https://api.open-meteo.com/v1/forecast?${params.toString()}`, {}, 1, 8000),
+        fetchAirQuality(latitude, longitude)
+    ]);
+    if (!res.ok) {
+        throw new PredictionError('Failed to fetch weather data', 502);
     }
+    const data = await res.json();
 
     const hourly = data?.hourly ?? {};
-    const daily = data?.daily ?? {};
     const length = Math.min(
         hourly?.relativehumidity_2m?.length ?? 0,
         hourly?.temperature_2m?.length ?? 0,
@@ -115,57 +169,22 @@ export async function predictSunset({ latitude, longitude }) {
         hourly?.windspeed_10m?.length ?? 0,
         hourly?.visibility?.length ?? 0
     );
-
-    // Select the hourly index nearest to actual sunset (SunCalc), aligned to location timezone
     const times = hourly?.time ?? [];
     const utcOffsetSeconds = Number(data?.utc_offset_seconds ?? 0);
 
-    // With timeformat=unixtime, hourly.time and daily.sunset are epoch seconds (aligned to the provided timezone)
-
-    // Compute sunset using SunCalc (absolute moment), then express it in the location's local timezone
-    let sunset = null;
-    try {
-        const sunTimes = SunCalc.getTimes(new Date(), latitude, longitude);
-        if (sunTimes && sunTimes.sunset instanceof Date && !isNaN(sunTimes.sunset.getTime())) {
-            sunset = sunTimes.sunset;
-        }
-    } catch {}
-
-    // Fallback to Open-Meteo daily sunset if available
-    let targetEpochLocalSec = null;
-    if (!sunset && data?.daily?.sunset?.[0] != null) {
-        const s = Number(data.daily.sunset[0]); // seconds since epoch (local clock)
-        if (Number.isFinite(s)) targetEpochLocalSec = s;
+    // Fall back to Open-Meteo's own sunset (also a UTC epoch) if SunCalc had none.
+    let targetSec = sunsetSec;
+    if (targetSec == null && Number.isFinite(Number(data?.daily?.sunset?.[0]))) {
+        targetSec = Number(data.daily.sunset[0]);
     }
 
     let idx = 0;
-    if (Array.isArray(times) && times.length > 0) {
-        // derive target epoch seconds of local sunset hour
-        if (sunset && targetEpochLocalSec == null) {
-            targetEpochLocalSec = Math.floor(sunset.getTime() / 1000) + utcOffsetSeconds;
-        }
-
-        if (targetEpochLocalSec != null) {
-            // choose closest hour by epoch seconds
-            let bestI = 0;
-            let bestDiff = Number.POSITIVE_INFINITY;
-            for (let i = 0; i < times.length; i++) {
-                const e = Number(times[i]);
-                if (!Number.isFinite(e)) continue;
-                const diff = Math.abs(e - targetEpochLocalSec);
-                if (diff < bestDiff) { bestDiff = diff; bestI = i; }
-            }
-            idx = bestI;
-        } else {
-            // Fallback: pick 18:00 local if we can't compute target, using hour-of-day heuristic
-            // With unixtime, we approximate by selecting the 18th element if available
-            idx = Math.min(18, times.length - 1);
-        }
+    if (Array.isArray(times) && times.length > 0 && targetSec != null) {
+        idx = Math.max(0, nearestIndex(times, targetSec));
     } else if (length > 0) {
+        // No sunset to anchor on (polar day/night): use 18:00 local as a heuristic.
         idx = Math.min(18, length - 1);
     }
-
-    const aod = Number(daily?.aerosol_optical_depth?.[0] ?? 0);
 
     // Weighted weather composites — weights stay paired with their index
     const composite = ((inds) => {
@@ -207,43 +226,15 @@ export async function predictSunset({ latitude, longitude }) {
     const dewpointC = computeDewPoint(composite.tempC, composite.humidity);
     const dewSpread = composite.tempC - dewpointC;
 
-    // Optional: Air quality for PM2.5/PM10 – request only when visibility/humidity suggest haze relevance
-    let pm25 = undefined;
-    if ((composite.visibilityM && composite.visibilityM < 12000) || composite.humidity > 75) {
-        try {
-            const aqParams = new URLSearchParams({
-                latitude: String(latitude),
-                longitude: String(longitude),
-                hourly: 'pm2_5',
-                timezone: 'auto',
-                timeformat: 'unixtime'
-            });
-            const aqUrl = `https://air-quality-api.open-meteo.com/v1/air-quality?${aqParams.toString()}`;
-            const aqRes = await fetchWithRetry(aqUrl, {}, 1, 6000);
-            if (aqRes.ok) {
-                const aq = await aqRes.json();
-                const aqTimes = aq?.hourly?.time || [];
-                const targetSec = Number(times?.[idx]);
-                if (Number.isFinite(targetSec)) {
-                    let bestI = -1;
-                    let bestDiff = Number.POSITIVE_INFINITY;
-                    for (let i = 0; i < aqTimes.length; i++) {
-                        const e = Number(aqTimes[i]);
-                        if (!Number.isFinite(e)) continue;
-                        const diff = Math.abs(e - targetSec);
-                        if (diff < bestDiff) { bestDiff = diff; bestI = i; }
-                    }
-                    if (bestI >= 0) pm25 = Number(aq?.hourly?.pm2_5?.[bestI]);
-                }
-            }
-        } catch {}
-    }
+    const selectedEpochSec = Number(times?.[idx]);
+    const airQuality = airQualityAt(aq, selectedEpochSec);
+    // PM2.5 only matters to the model when haze is plausible.
+    const hazeRelevant = (composite.visibilityM && composite.visibilityM < 12000) || composite.humidity > 75;
 
-    // Solar altitude at selected hour (approximate) for scoring band weighting
+    // Solar altitude at selected hour for scoring band weighting
     let solarAltitudeDeg = null;
     try {
-        const selectedUtcMs = (Number(times?.[idx]) - utcOffsetSeconds) * 1000; // convert local epoch seconds to UTC ms
-        const sunPos = SunCalc.getPosition(new Date(selectedUtcMs), latitude, longitude);
+        const sunPos = SunCalc.getPosition(new Date(selectedEpochSec * 1000), latitude, longitude);
         solarAltitudeDeg = (sunPos.altitude * 180) / Math.PI;
     } catch {}
 
@@ -252,8 +243,8 @@ export async function predictSunset({ latitude, longitude }) {
         midCloud: composite.midCloud,
         lowCloud: composite.lowCloud,
         humidity: composite.humidity,
-        aod,
-        solarAltitudeDeg: solarAltitudeDeg ?? undefined,
+        aod: airQuality.aod ?? 0,
+        solarAltitudeDeg: Number.isFinite(solarAltitudeDeg) ? solarAltitudeDeg : undefined,
         totalCloud: composite.totalCloud,
         precipitationProbability: composite.pop,
         precipitationMmPerHour: composite.precipMm,
@@ -264,21 +255,13 @@ export async function predictSunset({ latitude, longitude }) {
         temperature2mC: composite.tempC,
         dewPointC: dewpointC,
         dewPointSpreadC: dewSpread,
-        pm25UgM3: pm25,
+        pm25UgM3: hazeRelevant ? airQuality.pm25 : undefined,
         selectedHourIndex: idx,
         selectedHour: times?.[idx]
     };
-    const selectedEpochSec = Number(times?.[idx]);
-    const alignedToSunset = Number.isFinite(selectedEpochSec) && targetEpochLocalSec != null
-        ? Math.abs(selectedEpochSec - targetEpochLocalSec) <= 1800 // within 30 minutes of sunset hour
+    const alignedToSunset = Number.isFinite(selectedEpochSec) && targetSec != null
+        ? Math.abs(selectedEpochSec - targetSec) <= 1800 // within 30 minutes of sunset
         : false;
-
-    // Serve from the short-lived in-memory cache if we already scored this hour.
-    const hourKey = getCacheKeyWithHour(latitude, longitude, selectedEpochSec);
-    const cached = responseCache.get(hourKey);
-    if (cached && Date.now() - cached.ts < CACHE_TTL_MS) {
-        return cached.payload;
-    }
 
     const { score: qualityScore, details, confidence } = evaluate(weatherData, alignedToSunset);
 
@@ -287,10 +270,10 @@ export async function predictSunset({ latitude, longitude }) {
         weatherData,
         confidence,
         explanation: { factors: details },
-        used: { epochSecLocal: selectedEpochSec, latitude, longitude, utcOffsetSeconds }
+        used: { epochSec: selectedEpochSec, latitude, longitude, utcOffsetSeconds }
     };
 
-    try { responseCache.set(hourKey, { ts: Date.now(), payload }); } catch {}
+    cacheSet(cacheKey, payload);
 
     return payload;
 }
