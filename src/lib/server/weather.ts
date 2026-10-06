@@ -102,7 +102,7 @@ export function nearestIndex(epochs: ArrayLike<unknown>, targetSec: number): num
   return bestI;
 }
 
-/** Hourly surface forecast; null if the request fails. */
+/** Hourly surface forecast; null if the request fails for any reason. */
 export async function fetchForecast(
   latitude: number,
   longitude: number,
@@ -118,8 +118,13 @@ export async function fetchForecast(
     timeformat: 'unixtime',
     ...extra,
   });
-  const res = await fetchWithRetry(`https://api.open-meteo.com/v1/forecast?${params.toString()}`, {}, 1, 8000);
-  return res.ok ? ((await res.json()) as Forecast) : null;
+  try {
+    const res = await fetchWithRetry(`https://api.open-meteo.com/v1/forecast?${params.toString()}`, {}, 1, 8000);
+    return res.ok ? ((await res.json()) as Forecast) : null;
+  } catch {
+    // Network errors and timeouts: callers already treat null as "no forecast".
+    return null;
+  }
 }
 
 /**

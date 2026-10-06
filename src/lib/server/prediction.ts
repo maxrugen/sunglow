@@ -3,6 +3,7 @@ import { evaluate, type WeatherData } from '$lib/server/scoring';
 import { airQualityAt, compositeAt, fetchAirQuality, fetchForecast, hourCount, nearestIndex } from '$lib/server/weather';
 import { fetchHorizon } from '$lib/server/horizon';
 import { timeZoneAt } from '$lib/server/flight-time';
+import { BoundedCache } from '$lib/server/bounded-cache';
 import type { SkyEvent } from '$lib/types';
 
 export type PredictionPayload = {
@@ -35,11 +36,9 @@ export type PredictionPayload = {
   };
 };
 
-// Simple in-memory cache (ephemeral in serverless environments), keyed by
-// rounded coordinates + event + event hour, so repeat lookups skip the upstream fetches.
-const responseCache = new Map<string, { ts: number; payload: PredictionPayload }>();
-const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
-const CACHE_MAX_ENTRIES = 500;
+// In-memory cache (ephemeral in serverless environments), keyed by rounded
+// coordinates + event + event hour, so repeat lookups skip the upstream fetches.
+const responseCache = new BoundedCache<PredictionPayload>(10 * 60 * 1000);
 
 function getCacheKey(lat: number, lon: number, event: SkyEvent, eventEpochSec: number | null): string {
   const bucket =
@@ -47,15 +46,6 @@ function getCacheKey(lat: number, lon: number, event: SkyEvent, eventEpochSec: n
       ? `h:${Math.floor(eventEpochSec / 3600)}`
       : `d:${new Date().toISOString().slice(0, 10)}`;
   return `${lat.toFixed(3)},${lon.toFixed(3)},${event},${bucket}`;
-}
-
-function cacheSet(key: string, payload: PredictionPayload) {
-  if (responseCache.size >= CACHE_MAX_ENTRIES) {
-    // Maps iterate in insertion order, so the first key is the oldest.
-    const oldest = responseCache.keys().next().value;
-    if (oldest !== undefined) responseCache.delete(oldest);
-  }
-  responseCache.set(key, { ts: Date.now(), payload });
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -133,9 +123,7 @@ export async function predictEvent({
 
   const cacheKey = getCacheKey(latitude, longitude, event, eventSec);
   const cached = responseCache.get(cacheKey);
-  if (cached && Date.now() - cached.ts < CACHE_TTL_MS) {
-    return cached.payload;
-  }
+  if (cached) return cached;
 
   const [forecast, aq, horizon] = await Promise.all([
     // Two days so the next event is covered even when today's has passed.
@@ -221,6 +209,6 @@ export async function predictEvent({
     used: { epochSec: selectedEpochSec, latitude, longitude, utcOffsetSeconds },
   };
 
-  cacheSet(cacheKey, payload);
+  responseCache.set(cacheKey, payload);
   return payload;
 }

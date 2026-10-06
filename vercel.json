@@ -1,13 +1,3 @@
 {
-    "buildCommand": "npm run build",
-    "devCommand": "npm run dev",
-    "installCommand": "npm install",
-    "framework": "sveltekit",
-    "outputDirectory": ".svelte-kit",
-    "crons": [
-        {
-            "path": "/api/cron",
-            "schedule": "0 12 * * *"
-        }
-    ]
+    "framework": "sveltekit"
 }

@@ -22,7 +22,7 @@ Sunglow is a SvelteKit app (Svelte 5, runes) that predicts sunset and sunrise qu
 
 ### Location prediction
 
-1. `LocationInput.svelte` (city search via `/api/geocode`, or geolocation) → `+page.svelte` POSTs coordinates plus `event` (`'sunset' | 'sunrise'`, from the Sunset/Sunrise switch) to `/api/predict`.
+1. `LocationInput.svelte` (city search via `/api/geocode`, or geolocation, named via `src/lib/reverse-geocode.ts` in the browser: Open-Meteo has no reverse endpoint) → `+page.svelte` POSTs coordinates plus `event` (`'sunset' | 'sunrise'`, from the Sunset/Sunrise switch) to `/api/predict`.
 2. `predictEvent()` in `src/lib/server/prediction.ts`:
    - `nextEvent()` picks the next sunrise/sunset that isn't over yet (grace: 30 min after sunset, 15 min after sunrise). It checks SunCalc for yesterday/today/tomorrow because SunCalc's "nearest solar day" can return a passed event after local midnight or at high latitudes. `day` compares **local dates** (zone via `timeZoneAt()`), so 01:00 gives "this morning's sunrise".
    - Fetches the hourly forecast and air quality (AOD, PM2.5) via `src/lib/server/weather.ts`, plus cloud cover 50/150/300 km toward the sun at the event via `src/lib/server/horizon.ts` (one multi-point request), all in parallel.
@@ -43,6 +43,8 @@ Sunglow is a SvelteKit app (Svelte 5, runes) that predicts sunset and sunrise qu
   - `alertsDue()` (pure) returns due kinds: `sunset` (2–3 h before), `sunrise-evening` (20:00–23:00 local, tomorrow's sunrise), `sunrise-morning` (1–2 h before). Events come from `nextEvent()`; dedup keys are the event's local date in `lastNotifiedDate` / `lastSunriseEveningDate` / `lastSunriseMorningDate`.
   - `runAlerts()` predicts, then **claims** the alert (`UPDATE … WHERE col IS DISTINCT FROM key RETURNING`) before sending, so overlapping runs can't double-send; below-threshold results are claimed too, failed sends are released for retry.
 - `/api/cron` requires `Authorization: Bearer $CRON_SECRET`; without a secret it's only open in dev.
+- `sendPush()` sets `TTL` (until 30 min after the event), `urgency: 'high'` and a 5 s timeout. It prunes subscriptions on 404/410/400 and on web-push key-validation errors, but **not** on 403 (usually our VAPID config) or 413 (our payload).
+- `/api/cron` returns 500 when any alert failed, so cron-job.org reports it; errors are logged with `console.error`.
 
 ### Ratings
 
@@ -58,6 +60,8 @@ Generate with `npm run db:generate`; apply each new `drizzle/000N_*.sql` to Neon
 
 - `src/lib/server/scoring.ts` — `SCORING_VERSION` (bump on any change that alters scores, so stored ratings can be grouped by model), `calculateWithDetails()`, `calculateConfidence()`, `evaluate()`, `evaluateInFlight()`; both models share factor helpers with their own coefficients. `WeatherData` lives here.
 - `src/lib/server/horizon.ts` — sunset azimuth, great-circle sample points, `horizonBlocking()` (low + 0.5 × mid cloud, weighted 0.25/0.4/0.35). Feeds `horizonCloud` into the ground model only; a failed fetch just leaves it out.
+- `src/lib/server/validate.ts` — `parseLatLon()` (finite, |lat| ≤ 90, |lon| ≤ 180: out-of-range values crash `tz-lookup`), `cleanLabel()`, `validPushKeys()`. Use these for any new route input.
+- `src/lib/server/bounded-cache.ts` — TTL + size-capped in-memory cache used by the prediction and flight endpoints.
 - `src/lib/server/weather.ts` — Open-Meteo fetches, `nearestIndex()`, `compositeAt()` (weights `[0.3, 0.6, 0.1]` over `[idx-1, idx, idx+1]`), `fetchWithRetry()` (retries 5xx/429 only).
 - `src/lib/score.ts` — `scoreLabel()` and `applyScoreTheme()`: one set of score bands (80/65/40) for labels and page theme.
 - `src/lib/types.ts` — shared client types and `toClientPrediction()`.

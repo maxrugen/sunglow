@@ -24,3 +24,10 @@ describe('POST /api/predict-flight cache', () => {
     expect(actual.route.arrivalTime).toBe('2026-10-08T02:58:00.000Z');
   });
 });
+
+describe('POST /api/predict-flight input', () => {
+  it('rejects a body that is not JSON with 400', async () => {
+    const request = new Request('http://localhost/api/predict-flight', { method: 'POST', body: 'not json' });
+    expect((await POST({ request } as Parameters<typeof POST>[0])).status).toBe(400);
+  });
+});

@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { airQualityAt, compositeAt, dewPoint, hourCount, nearestIndex, type Forecast } from './weather';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { airQualityAt, compositeAt, dewPoint, fetchForecast, hourCount, nearestIndex, type Forecast } from './weather';
 
 function forecast(hours: number, values: Partial<Record<string, number[]>> = {}): Forecast {
   const fill = (v: number) => Array.from({ length: hours }, () => v);
@@ -60,5 +60,14 @@ describe('airQualityAt()', () => {
 
   it('returns undefined values without data', () => {
     expect(airQualityAt(null, 0)).toEqual({ aod: undefined, pm25: undefined });
+  });
+});
+
+describe('fetchForecast()', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('returns null instead of throwing when the network fails', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('fetch failed'); }));
+    expect(await fetchForecast(52.5, 13.4, 2)).toBeNull();
   });
 });

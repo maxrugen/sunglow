@@ -6,6 +6,7 @@ import { pushSubscriptions } from '$lib/server/db/schema';
 import { isAllowedPushEndpoint } from '$lib/server/webpush';
 import { pushRequestAuthorized } from '$lib/server/push-auth';
 import { parseAlertEvents } from '$lib/server/alerts';
+import { cleanLabel, parseLatLon, validPushKeys } from '$lib/server/validate';
 
 export const POST: RequestHandler = async ({ request }) => {
   if (!pushRequestAuthorized(request)) {
@@ -23,19 +24,19 @@ export const POST: RequestHandler = async ({ request }) => {
   const endpoint = sub?.endpoint;
   const p256dh = sub?.keys?.p256dh;
   const auth = sub?.keys?.auth;
-  const latitude = Number(body?.latitude);
-  const longitude = Number(body?.longitude);
-  const label = typeof body?.label === 'string' ? body.label : null;
+  const coords = parseLatLon(body?.latitude, body?.longitude);
+  const label = cleanLabel(body?.label);
 
   if (typeof endpoint !== 'string' || !isAllowedPushEndpoint(endpoint)) {
     return json({ error: 'invalid or disallowed push endpoint' }, { status: 400 });
   }
-  if (typeof p256dh !== 'string' || typeof auth !== 'string') {
-    return json({ error: 'missing subscription keys' }, { status: 400 });
+  if (!validPushKeys(p256dh, auth)) {
+    return json({ error: 'missing or malformed subscription keys' }, { status: 400 });
   }
-  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+  if (!coords) {
     return json({ error: 'invalid or missing latitude/longitude' }, { status: 400 });
   }
+  const { latitude, longitude } = coords;
   const events = parseAlertEvents(body?.events);
   if (!events) {
     return json({ error: 'events must enable sunset and/or sunrise' }, { status: 400 });

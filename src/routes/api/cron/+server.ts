@@ -20,7 +20,7 @@ function num(value: string | undefined, fallback: number): number {
 const CONCURRENCY = 5;
 
 /**
- * Bearer header matching CRON_SECRET (Vercel Cron sends this automatically).
+ * Bearer header matching CRON_SECRET (sent by the hourly cron-job.org job).
  * Without a secret the endpoint is only open in local dev.
  */
 function cronAuthorized(request: Request): boolean {
@@ -46,7 +46,7 @@ const deps: AlertDeps<PushSubscriptionRow> = {
       .set({ [due.column]: sub[due.column] })
       .where(and(eq(pushSubscriptions.endpoint, sub.endpoint), eq(pushSubscriptions[due.column], due.dayKey)));
   },
-  send: (sub, message) => sendPush(sub, message),
+  send: (sub, message, options) => sendPush(sub, message, options),
 };
 
 async function handle(request: Request, url: URL) {
@@ -81,8 +81,9 @@ async function handle(request: Request, url: URL) {
           for (const { kind, outcome } of await runAlerts(sub, now, alertConfig, appUrl, deps)) {
             outcomes[kind][outcome] = (outcomes[kind][outcome] ?? 0) + 1;
           }
-        } catch {
+        } catch (err) {
           // A DB error for one subscriber shouldn't abort the whole run.
+          console.error('[cron] subscriber failed', sub.id, err);
           failed++;
         }
       }
@@ -91,13 +92,15 @@ async function handle(request: Request, url: URL) {
 
   const total = (outcome: AlertOutcome) =>
     Object.values(outcomes).reduce((sum, byOutcome) => sum + (byOutcome[outcome] ?? 0), 0);
-  return json({
+  const summary = {
     checked: subs.length,
     sent: total('sent'),
     pruned: total('pruned'),
     failed: failed + total('predict-failed') + total('send-failed'),
     byKind: outcomes,
-  });
+  };
+  // A non-2xx status makes the scheduler (cron-job.org) report the failed run.
+  return json(summary, { status: summary.failed > 0 ? 500 : 200 });
 }
 
 export const GET: RequestHandler = ({ request, url }) => handle(request, url);
