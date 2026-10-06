@@ -66,8 +66,11 @@ describe('GET /api/geocode', () => {
 
     it('stays empty, after at most three requests, when nothing matches', async () => {
       const fetchImpl = openMeteo();
-      expect(await (await call('Nowhere At All Here', fetchImpl as unknown as typeof fetch)).json()).toEqual({ results: [] });
+      const res = await call('Nowhere At All Here', fetchImpl as unknown as typeof fetch);
+      expect(await res.json()).toEqual({ results: [] });
       expect(fetchImpl).toHaveBeenCalledTimes(3);
+      // Not cached for a day like real results, so a later fix reaches people quickly.
+      expect(res.headers.get('cache-control')).toBe('public, max-age=60');
     });
   });
 

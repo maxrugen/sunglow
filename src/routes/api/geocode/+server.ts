@@ -38,8 +38,10 @@ export const GET: RequestHandler = async ({ url, fetch }) => {
             latitude: r.latitude,
             longitude: r.longitude
         }));
-        // Place names don't change; let browsers and the CDN reuse answers.
-        return json({ results }, { headers: { 'Cache-Control': 'public, max-age=86400' } });
+        // Place names don't change; let browsers and the CDN reuse answers. Empty answers only
+        // briefly, so a "nothing found" doesn't outlive a search improvement (or a typo fix upstream).
+        const maxAge = results.length > 0 ? 86400 : 60;
+        return json({ results }, { headers: { 'Cache-Control': `public, max-age=${maxAge}` } });
     } catch (err) {
         console.error('[geocode]', err);
         // An error (not an empty list), so the UI says the search failed rather than "No results".
