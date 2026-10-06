@@ -4,6 +4,8 @@
     import PushSubscribeButton from '$lib/components/PushSubscribeButton.svelte';
     import FlightInput from '$lib/components/FlightInput.svelte';
     import FlightResultsDisplay from '$lib/components/FlightResultsDisplay.svelte';
+    import RatingPrompt from '$lib/components/RatingPrompt.svelte';
+    import { rememberForRating } from '$lib/rating-store';
     import { onMount, untrack } from 'svelte';
     import { applyScoreTheme } from '$lib/score';
     import { errorMessageFrom } from '$lib/http';
@@ -50,6 +52,7 @@
             predictionData = toClientPrediction(await res.json());
             applyScoreTheme(predictionData.qualityScore);
             rememberLocation(latitude, longitude);
+            rememberForRating(predictionData, locationLabel);
         } catch (err) {
             errorMessage = err instanceof Error ? err.message : 'An unexpected error occurred.';
         } finally {
@@ -86,6 +89,7 @@
         if (!ssr) return;
         applyScoreTheme(ssr.qualityScore);
         rememberLocation(ssr.latitude, ssr.longitude);
+        if (predictionData) rememberForRating(predictionData, locationLabel);
     });
 
     function switchMode(target: 'location' | 'flight') {
@@ -147,6 +151,7 @@
     </nav>
 
     {#if mode === 'location'}
+        <RatingPrompt />
         {#if isLoading}
             <div class="loader" aria-live="polite">Loading prediction…</div>
         {:else if predictionData}

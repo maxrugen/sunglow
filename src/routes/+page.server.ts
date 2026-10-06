@@ -1,6 +1,7 @@
 import { env } from '$env/dynamic/private';
 import type { PageServerLoad } from './$types';
 import { predictSunset } from '$lib/server/prediction';
+import { createRatingToken } from '$lib/server/ratings';
 
 /** Server-render a prediction for deep links like /?lat=…&lon=…&label=… (e.g. from push notifications). */
 export const load: PageServerLoad = async ({ url }) => {
@@ -33,6 +34,7 @@ export const load: PageServerLoad = async ({ url }) => {
         day: payload.day,
         timings: payload.timings,
         used: payload.used,
+        ratingToken: createRatingToken(payload),
       },
     };
   } catch {

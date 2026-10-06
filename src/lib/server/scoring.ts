@@ -1,3 +1,9 @@
+/**
+ * Identifies the scoring model behind stored predictions (see sunset_ratings).
+ * Bump it whenever a change alters scores, so ratings can be grouped by model.
+ */
+export const SCORING_VERSION = 1;
+
 export type WeatherData = {
   highCloud: number;
   midCloud: number;

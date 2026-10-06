@@ -10,6 +10,8 @@ export type PredictionSummary = {
   day?: 'today' | 'tomorrow';
   timings?: { sunsetEpochSec: number | null; goldenHourEpochSec: number | null };
   used?: { epochSec?: number; latitude?: number; longitude?: number; utcOffsetSeconds?: number };
+  /** Signed snapshot for a later "How was it?" rating; absent when ratings are off. */
+  ratingToken?: string;
 };
 
 export type ClientPrediction = {
@@ -19,6 +21,7 @@ export type ClientPrediction = {
   day: 'today' | 'tomorrow';
   timings: { sunset: Date | null; goldenHour: Date | null };
   used?: { epochSec?: number; latitude?: number; longitude?: number; utcOffsetSeconds?: number };
+  ratingToken?: string;
 };
 
 export function toClientPrediction(p: PredictionSummary): ClientPrediction {
@@ -30,6 +33,7 @@ export function toClientPrediction(p: PredictionSummary): ClientPrediction {
     day: p.day ?? 'today',
     timings: { sunset: toDate(p.timings?.sunsetEpochSec), goldenHour: toDate(p.timings?.goldenHourEpochSec) },
     used: p.used,
+    ratingToken: p.ratingToken,
   };
 }
 
