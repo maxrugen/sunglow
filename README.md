@@ -288,7 +288,7 @@ Optional. Copy `.env.example` to `.env.local` and set `DATABASE_URL`, the VAPID 
 
 - `/api/push/subscribe` stores the subscription with its location.
 - `/api/cron` (requires `Authorization: Bearer $CRON_SECRET`) checks subscribers whose sunset is 2–3 hours away and sends a notification when the score and confidence meet `SUNSET_SCORE_MIN` / `SUNSET_CONFIDENCE_MIN`. At most one alert per location per day.
-- Vercel Hobby crons only run daily, so `.github/workflows/cron.yml` calls the endpoint hourly. It needs the `APP_URL` and `CRON_SECRET` repository secrets.
+- Vercel Hobby crons only run daily, so an hourly job on [cron-job.org](https://cron-job.org) calls the endpoint with the bearer header. GitHub Actions schedules were too unreliable (runs 6–9 h apart). `.github/workflows/cron.yml` remains for manual runs and needs the `APP_URL` and `CRON_SECRET` repository secrets.
 
 ---
 

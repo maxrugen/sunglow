@@ -1,12 +1,10 @@
 name: Sunset alert cron
 
-# Vercel Hobby fires project crons only once per day, but sunsets happen at each
-# subscriber's local time. This external scheduler hits /api/cron hourly so the
-# endpoint can notify ~2h before each user's local sunset.
+# Manual trigger for /api/cron (Actions tab → Run workflow), e.g. for testing.
+# The hourly schedule runs on cron-job.org: GitHub's scheduled runs were
+# delayed by hours, so alerts missed the 2–3 h window before sunset.
 on:
-  schedule:
-    - cron: '0 * * * *' # every hour, on the hour (UTC)
-  workflow_dispatch: {} # allow manual runs from the Actions tab
+  workflow_dispatch: {}
 
 jobs:
   trigger:
