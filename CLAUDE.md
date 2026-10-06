@@ -41,9 +41,14 @@ Sunglow is a SvelteKit app (Svelte 5, runes) that predicts sunset quality for a 
 - `/api/cron` runs hourly (GitHub Actions `cron.yml`; Vercel Hobby cron is only daily). It notifies subscribers whose sunset is 2–3 h away and scores ≥ `SUNSET_SCORE_MIN`, deduped per day via `lastNotifiedDate`.
 - `/api/cron` requires `Authorization: Bearer $CRON_SECRET`; without a secret it's only open in dev.
 
+### Sunset ratings
+
+- `/api/predict` and the deep-link load attach a `ratingToken` (`src/lib/server/ratings.ts`): an HMAC-signed snapshot of the prediction (inputs, score, confidence, `SCORING_VERSION`). Requires `RATING_SECRET` + `DATABASE_URL`, otherwise ratings are off.
+- `RatingPrompt.svelte` + `src/lib/rating-store.ts` (localStorage) ask for a 1–5 rating from 15 min before until 24 h after a viewed sunset; `POST /api/ratings` verifies the token and upserts into `sunset_ratings`.
+
 ### Key files
 
-- `src/lib/server/scoring.ts` — `calculateWithDetails()`, `calculateConfidence()`, `evaluate()`, `evaluateInFlight()`; both models share factor helpers with their own coefficients. `WeatherData` lives here.
+- `src/lib/server/scoring.ts` — `SCORING_VERSION` (bump on any change that alters scores, so stored ratings can be grouped by model), `calculateWithDetails()`, `calculateConfidence()`, `evaluate()`, `evaluateInFlight()`; both models share factor helpers with their own coefficients. `WeatherData` lives here.
 - `src/lib/server/horizon.ts` — sunset azimuth, great-circle sample points, `horizonBlocking()` (low + 0.5 × mid cloud, weighted 0.25/0.4/0.35). Feeds `horizonCloud` into the ground model only; a failed fetch just leaves it out.
 - `src/lib/server/weather.ts` — Open-Meteo fetches, `nearestIndex()`, `compositeAt()` (weights `[0.3, 0.6, 0.1]` over `[idx-1, idx, idx+1]`), `fetchWithRetry()` (retries 5xx/429 only).
 - `src/lib/score.ts` — `scoreLabel()` and `applyScoreTheme()`: one set of score bands (80/65/40) for labels and page theme.

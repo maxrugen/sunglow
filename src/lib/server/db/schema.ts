@@ -1,7 +1,10 @@
 import {
   doublePrecision,
+  integer,
+  jsonb,
   pgTable,
   serial,
+  smallint,
   text,
   timestamp,
   uniqueIndex,
@@ -33,3 +36,32 @@ export const pushSubscriptions = pgTable(
 );
 
 export type PushSubscriptionRow = typeof pushSubscriptions.$inferSelect;
+
+/**
+ * "How was it?" ratings, stored with a snapshot of what the model saw, so the
+ * scoring coefficients can be calibrated against real observations later.
+ */
+export const sunsetRatings = pgTable(
+  'sunset_ratings',
+  {
+    id: serial('id').primaryKey(),
+    /** Random per-browser id, so each device rates a given sunset once. */
+    deviceId: text('device_id').notNull(),
+    /** Rounded to 2 decimals (~1 km). */
+    latitude: doublePrecision('latitude').notNull(),
+    longitude: doublePrecision('longitude').notNull(),
+    sunsetAt: ts('sunset_at').notNull(),
+    /** 1–5 stars. */
+    rating: smallint('rating').notNull(),
+    predictedScore: smallint('predicted_score').notNull(),
+    confidence: smallint('confidence').notNull(),
+    /** SCORING_VERSION that produced predictedScore. */
+    scoringVersion: integer('scoring_version').notNull(),
+    /** WeatherData inputs as scored. */
+    weather: jsonb('weather').notNull(),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('sunset_rating_device_uq').on(t.deviceId, t.sunsetAt, t.latitude, t.longitude)]
+);
+
+export type SunsetRatingRow = typeof sunsetRatings.$inferSelect;

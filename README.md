@@ -277,6 +277,7 @@ src/
       geocode/+server.ts           # city → coords proxy
       reverse-geocode/+server.ts   # coords → label proxy (+fallback)
       push/{subscribe,unsubscribe} # store/remove push subscriptions
+      ratings/+server.ts           # store "How was it?" ratings
       cron/+server.ts              # hourly sunset-alert job
 ```
 
@@ -288,6 +289,15 @@ Optional. Copy `.env.example` to `.env.local` and set `DATABASE_URL`, the VAPID 
 - `/api/push/subscribe` stores the subscription with its location.
 - `/api/cron` (requires `Authorization: Bearer $CRON_SECRET`) checks subscribers whose sunset is 2–3 hours away and sends a notification when the score and confidence meet `SUNSET_SCORE_MIN` / `SUNSET_CONFIDENCE_MIN`. At most one alert per location per day.
 - Vercel Hobby crons only run daily, so `.github/workflows/cron.yml` calls the endpoint hourly. It needs the `APP_URL` and `CRON_SECRET` repository secrets.
+
+---
+
+## Sunset ratings ("How was it?")
+Optional, for calibrating the scoring model. Needs `DATABASE_URL` and `RATING_SECRET`; run `npm run db:push` (or apply `drizzle/0001_*.sql`) to create the `sunset_ratings` table.
+
+- Each location prediction includes a signed `ratingToken`: a snapshot of the weather inputs, score, confidence and `SCORING_VERSION`.
+- The browser remembers the last few predictions viewed. From 15 minutes before sunset until 24 hours after, the app asks "How was the sunset?" (1–5).
+- `POST /api/ratings` verifies the token and stores the rating with the snapshot, at most one per device, sunset and location. Coordinates are rounded to ~1 km; no other personal data is stored.
 
 ---
 

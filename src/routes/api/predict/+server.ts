@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { predictSunset, PredictionError } from '$lib/server/prediction';
+import { createRatingToken } from '$lib/server/ratings';
 
 export const POST: RequestHandler = async ({ request }) => {
   let body: { latitude?: unknown; longitude?: unknown };
@@ -19,7 +20,10 @@ export const POST: RequestHandler = async ({ request }) => {
   try {
     const payload = await predictSunset({ latitude, longitude });
     // Short-lived caching by proxies/clients; the server also caches per sunset hour.
-    return json(payload, { headers: { 'Cache-Control': 'public, max-age=120' } });
+    return json(
+      { ...payload, ratingToken: createRatingToken(payload) },
+      { headers: { 'Cache-Control': 'public, max-age=120' } }
+    );
   } catch (err) {
     if (err instanceof PredictionError) {
       return json({ error: err.message }, { status: err.status });
