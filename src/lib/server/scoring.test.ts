@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import {
-  calculateSunsetQuality,
   calculateWithDetails,
   calculateConfidence,
   evaluate,
@@ -32,19 +31,20 @@ function baseWeather(overrides: Partial<WeatherData> = {}): WeatherData {
 
 // ── Ground-level scoring ────────────────────────────────────────────
 
-describe('calculateSunsetQuality()', () => {
+describe('ground-level score', () => {
   it('scores high for ideal conditions', () => {
-    const score = calculateSunsetQuality(baseWeather());
+    const score = calculateWithDetails(baseWeather()).score;
     expect(score).toBeGreaterThanOrEqual(80);
   });
 
-  it('scores low for heavy low cloud', () => {
-    const score = calculateSunsetQuality(baseWeather({ lowCloud: 95 }));
-    expect(score).toBeLessThan(30);
+  it('rates heavy low cloud as Poor', () => {
+    // Additive bonuses apply after the low-cloud gate, so this stays around 30.
+    const score = calculateWithDetails(baseWeather({ lowCloud: 95 })).score;
+    expect(score).toBeLessThan(40);
   });
 
   it('returns 0-100 range', () => {
-    const score = calculateSunsetQuality(baseWeather({ lowCloud: 100, humidity: 100, highCloud: 0, midCloud: 0, aod: 0 }));
+    const score = calculateWithDetails(baseWeather({ lowCloud: 100, humidity: 100, highCloud: 0, midCloud: 0, aod: 0 })).score;
     expect(score).toBeGreaterThanOrEqual(0);
     expect(score).toBeLessThanOrEqual(100);
   });

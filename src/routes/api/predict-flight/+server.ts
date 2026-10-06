@@ -7,19 +7,12 @@ import {
   bestSunsetWaypoint,
   computeSunSide
 } from '$lib/server/flight-route';
-import { fetchWithRetry, fetchAirQuality, airQualityAt } from '$lib/server/prediction';
+import { airQualityAt, compositeAt, fetchAirQuality, fetchForecast, nearestIndex } from '$lib/server/weather';
 import { resolveFlightTimes, timeZoneAt } from '$lib/server/flight-time';
-import airportsData from '$lib/data/airports.json';
+import { airportByIata } from '$lib/server/airports';
+import type { WeatherData } from '$lib/server/scoring';
 import type { RequestHandler } from './$types';
-import type { Airport, FlightPredictionResponse, SunsetWaypoint } from '$lib/types';
-
-const airports: Airport[] = airportsData as Airport[];
-
-// Build a lookup map for fast IATA resolution
-const airportByIata = new Map<string, Airport>();
-for (const a of airports) {
-  airportByIata.set(a.iata, a);
-}
+import type { FlightPredictionResponse, SunsetWaypoint } from '$lib/types';
 
 // In-memory cache
 const cache = new Map<string, { ts: number; payload: FlightPredictionResponse }>();
@@ -31,92 +24,30 @@ const MAX_FORECAST_DAYS = 16;
 /** Beyond this lead time, forecasts degrade enough to lower confidence. */
 const RELIABLE_LEAD_DAYS = 3;
 
-function computeDewPoint(tempC: number, rh: number): number {
-  const a = 17.27;
-  const b = 237.7;
-  const gamma = (a * tempC) / (b + tempC) + Math.log(Math.max(1e-6, rh) / 100);
-  return (b * gamma) / (a - gamma);
-}
-
 /**
- * Fetch weather data from Open-Meteo for a specific lat/lon, selecting the
- * hourly index closest to `targetEpochMs`. Returns null when the time is
- * outside the forecast window or the fetch fails.
+ * Surface weather at a point, for the hour closest to `targetEpochMs`. Returns
+ * null when the time is outside the forecast window or the fetch fails.
  */
-async function fetchWeatherAtPoint(lat: number, lon: number, targetEpochMs: number) {
+async function fetchWeatherAtPoint(lat: number, lon: number, targetEpochMs: number): Promise<WeatherData | null> {
   const daysAhead = Math.ceil((targetEpochMs - Date.now()) / DAY_MS);
   if (daysAhead < 0 || daysAhead >= MAX_FORECAST_DAYS) return null;
 
-  const params = new URLSearchParams({
-    latitude: String(lat),
-    longitude: String(lon),
-    hourly: 'relativehumidity_2m,temperature_2m,cloudcover_low,cloudcover_mid,cloudcover_high,cloudcover,precipitation_probability,precipitation,pressure_msl,windspeed_10m,visibility',
+  const [forecast, aq] = await Promise.all([
     // +1 because the window starts at local midnight today.
-    forecast_days: String(Math.min(MAX_FORECAST_DAYS, daysAhead + 1)),
-    timezone: 'auto',
-    timeformat: 'unixtime'
-  });
-
-  const [res, aq] = await Promise.all([
-    fetchWithRetry(`https://api.open-meteo.com/v1/forecast?${params.toString()}`, {}, 1, 8000),
+    fetchForecast(lat, lon, Math.min(MAX_FORECAST_DAYS, daysAhead + 1)),
     fetchAirQuality(lat, lon)
   ]);
-  if (!res.ok) return null;
-  const data: any = await res.json();
+  const times = forecast?.hourly?.time ?? [];
+  if (!forecast || times.length === 0) return null;
 
-  const hourly = data?.hourly ?? {};
-  const times: number[] = hourly?.time ?? [];
-  if (times.length === 0) return null;
-
-  // unixtime values are UTC epochs, so compare against the UTC target directly.
   const targetSec = Math.floor(targetEpochMs / 1000);
-  let idx = 0;
-  let bestDiff = Infinity;
-  for (let i = 0; i < times.length; i++) {
-    const diff = Math.abs(Number(times[i]) - targetSec);
-    if (diff < bestDiff) { bestDiff = diff; idx = i; }
-  }
+  const idx = nearestIndex(times, targetSec);
   // Nearest hour is far off: the target is outside what was returned.
-  if (bestDiff > 3600) return null;
+  if (idx < 0 || Math.abs(times[idx] - targetSec) > 3600) return null;
 
-  const length = times.length;
+  const c = compositeAt(forecast, idx);
+  const { aod } = airQualityAt(aq, times[idx]);
 
-  // Weighted composite [idx-1, idx, idx+1] — weights must stay paired with their index
-  const indexWeightPairs: Array<[number, number]> = [];
-  if (idx - 1 >= 0 && idx - 1 < length) indexWeightPairs.push([idx - 1, 0.3]);
-  indexWeightPairs.push([idx, 0.6]);
-  if (idx + 1 < length) indexWeightPairs.push([idx + 1, 0.1]);
-  const indices = indexWeightPairs.map(([i]) => i);
-  const weights = indexWeightPairs.map(([, w]) => w);
-  const weightSum = weights.reduce((a, b) => a + b, 0) || 1;
-
-  const composite = indices.reduce((acc, i, k) => {
-    const w = weights[k] / weightSum;
-    acc.humidity += w * Number(hourly?.relativehumidity_2m?.[i] ?? 0);
-    acc.tempC += w * Number(hourly?.temperature_2m?.[i] ?? 0);
-    acc.lowCloud += w * Number(hourly?.cloudcover_low?.[i] ?? 0);
-    acc.midCloud += w * Number(hourly?.cloudcover_mid?.[i] ?? 0);
-    acc.highCloud += w * Number(hourly?.cloudcover_high?.[i] ?? 0);
-    acc.totalCloud += w * Number(hourly?.cloudcover?.[i] ?? 0);
-    acc.pop += w * Number(hourly?.precipitation_probability?.[i] ?? 0);
-    acc.precipMm += w * Number(hourly?.precipitation?.[i] ?? 0);
-    acc.pressure += w * Number(hourly?.pressure_msl?.[i] ?? 0);
-    acc.windMs += w * Number(hourly?.windspeed_10m?.[i] ?? 0);
-    acc.visibilityM += w * Number(hourly?.visibility?.[i] ?? 0);
-    return acc;
-  }, { humidity: 0, tempC: 0, lowCloud: 0, midCloud: 0, highCloud: 0, totalCloud: 0, pop: 0, precipMm: 0, pressure: 0, windMs: 0, visibilityM: 0 });
-
-  let pressureTrend = 0;
-  if (idx - 1 >= 0) {
-    pressureTrend = composite.pressure - Number(hourly?.pressure_msl?.[idx - 1] ?? composite.pressure);
-  }
-
-  const dewpointC = computeDewPoint(composite.tempC, composite.humidity);
-  const dewSpread = composite.tempC - dewpointC;
-
-  const { aod } = airQualityAt(aq, Number(times[idx]));
-
-  // Solar altitude at the target time
   let solarAltitudeDeg: number | undefined;
   try {
     const sunPos = SunCalc.getPosition(new Date(targetEpochMs), lat, lon);
@@ -124,19 +55,19 @@ async function fetchWeatherAtPoint(lat: number, lon: number, targetEpochMs: numb
   } catch { /* ignore */ }
 
   return {
-    highCloud: composite.highCloud,
-    midCloud: composite.midCloud,
-    lowCloud: composite.lowCloud,
-    humidity: composite.humidity,
+    highCloud: c.highCloud,
+    midCloud: c.midCloud,
+    lowCloud: c.lowCloud,
+    humidity: c.humidity,
     aod: aod ?? 0,
     solarAltitudeDeg,
-    totalCloud: composite.totalCloud,
-    precipitationProbability: composite.pop,
-    precipitationMmPerHour: composite.precipMm,
-    pressureTrendHpa: pressureTrend,
-    windSpeed10mMs: composite.windMs,
-    visibilityM: composite.visibilityM,
-    dewPointSpreadC: dewSpread,
+    totalCloud: c.totalCloud,
+    precipitationProbability: c.pop,
+    precipitationMmPerHour: c.precipMm,
+    pressureTrendHpa: c.pressureTrend,
+    windSpeed10mMs: c.windMs,
+    visibilityM: c.visibilityM,
+    dewPointSpreadC: c.dewSpread,
   };
 }
 
@@ -153,8 +84,8 @@ export const POST: RequestHandler = async ({ request }) => {
       return json({ error: 'Missing departure or arrival airport.' }, { status: 400 });
     }
 
-    const depAirport = airportByIata.get(depIata);
-    const arrAirport = airportByIata.get(arrIata);
+    const depAirport = airportByIata(depIata);
+    const arrAirport = airportByIata(arrIata);
     if (!depAirport) {
       return json({ error: `Unknown departure airport: ${depIata}` }, { status: 400 });
     }

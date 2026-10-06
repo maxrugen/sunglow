@@ -81,8 +81,8 @@
                 message = 'Notification permission was not granted.';
                 return;
             }
-            const reg = await navigator.serviceWorker.register('/service-worker.js');
-            await navigator.serviceWorker.ready;
+            // SvelteKit registers the service worker on load; wait for it to activate.
+            const reg = await navigator.serviceWorker.ready;
             const sub = await reg.pushManager.subscribe({
                 userVisibleOnly: true,
                 applicationServerKey: urlBase64ToUint8Array(vapid)

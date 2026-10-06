@@ -1,5 +1,7 @@
 import { json } from '@sveltejs/kit';
+import { env } from '$env/dynamic/private';
 import type { RequestHandler } from './$types';
+import { airportByIata } from '$lib/server/airports';
 
 /**
  * Optional flight number lookup using AviationStack API.
@@ -8,7 +10,7 @@ import type { RequestHandler } from './$types';
  * GET /api/flight-lookup?flight=AA1004&date=2026-04-15
  */
 export const GET: RequestHandler = async ({ url }) => {
-  const apiKey = process.env.AVIATIONSTACK_API_KEY;
+  const apiKey = env.AVIATIONSTACK_API_KEY;
   if (!apiKey) {
     return json(
       { error: 'Flight lookup is not configured. Please enter airports manually.' },
@@ -71,12 +73,14 @@ export const GET: RequestHandler = async ({ url }) => {
         airport: f.departure?.airport || '',
         scheduled: f.departure?.scheduled || '',
         timezone: f.departure?.timezone || '',
+        match: airportByIata(f.departure?.iata ?? '') ?? null,
       },
       arrival: {
         iata: f.arrival?.iata || '',
         airport: f.arrival?.airport || '',
         scheduled: f.arrival?.scheduled || '',
         timezone: f.arrival?.timezone || '',
+        match: airportByIata(f.arrival?.iata ?? '') ?? null,
       },
     });
   } catch (e: unknown) {

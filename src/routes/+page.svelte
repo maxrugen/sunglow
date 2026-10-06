@@ -231,7 +231,7 @@
         {:else if flightPrediction}
             <FlightResultsDisplay prediction={flightPrediction} on:back={onFlightBack} />
         {:else}
-            <FlightInput on:flightSubmit={onFlightSubmit} on:flightError={onLocationError} on:switchMode={() => switchMode('location')} />
+            <FlightInput lookupAvailable={data.flightLookupAvailable} on:flightSubmit={onFlightSubmit} on:flightError={onLocationError} on:switchMode={() => switchMode('location')} />
         {/if}
     {/if}
 
