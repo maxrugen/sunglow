@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { mockEnv } from '#lib/server/test-env.js';
 
-vi.mock('$env/dynamic/private', () => ({ env: {} }));
+vi.mock('$app/env/private', () => mockEnv());
 
 let existing: { latitude: number; longitude: number } | undefined;
 let upsert: { values: Record<string, unknown>; set: Record<string, unknown> } | null = null;
-vi.mock('$lib/server/db', () => ({
+vi.mock('#lib/server/db/index.js', () => ({
   db: {
     select: () => ({ from: () => ({ where: async () => (existing ? [existing] : []) }) }),
     insert: () => ({

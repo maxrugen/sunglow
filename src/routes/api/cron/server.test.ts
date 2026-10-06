@@ -1,12 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { mockEnv } from '#lib/server/test-env.js';
 
-vi.mock('$env/dynamic/private', () => ({ env: { CRON_SECRET: 'secret' } }));
-vi.mock('$app/environment', () => ({ dev: false }));
-vi.mock('$lib/server/db', () => ({
+vi.mock('$app/env/private', () => mockEnv({ CRON_SECRET: 'secret' }));
+vi.mock('$app/env', () => ({ dev: false }));
+vi.mock('#lib/server/db/index.js', () => ({
   db: { select: () => ({ from: async () => [{ id: 1, endpoint: 'https://fcm.googleapis.com/x' }] }) },
 }));
 const runAlerts = vi.fn();
-vi.mock('$lib/server/alerts', () => ({ runAlerts }));
+vi.mock('#lib/server/alerts.js', () => ({ runAlerts }));
 
 const { GET } = await import('./+server');
 

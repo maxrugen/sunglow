@@ -2,7 +2,6 @@ import js from '@eslint/js';
 import ts from 'typescript-eslint';
 import svelte from 'eslint-plugin-svelte';
 import globals from 'globals';
-import svelteConfig from './svelte.config.js';
 
 /** Correctness-focused linting; formatting is left to editors. */
 export default ts.config(
@@ -21,7 +20,6 @@ export default ts.config(
         projectService: true,
         extraFileExtensions: ['.svelte'],
         parser: ts.parser,
-        svelteConfig,
       },
     },
   },

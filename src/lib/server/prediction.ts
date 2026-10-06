@@ -1,10 +1,10 @@
 import SunCalc from 'suncalc';
-import { evaluate, type WeatherData } from '$lib/server/scoring';
-import { airQualityAt, compositeAt, fetchAirQuality, fetchForecast, hourCount, nearestIndex } from '$lib/server/weather';
-import { fetchHorizon } from '$lib/server/horizon';
-import { timeZoneAt } from '$lib/server/flight-time';
-import { BoundedCache } from '$lib/server/bounded-cache';
-import type { SkyEvent } from '$lib/types';
+import { evaluate, type WeatherData } from '#lib/server/scoring.js';
+import { airQualityAt, compositeAt, fetchAirQuality, fetchForecast, hourCount, nearestIndex } from '#lib/server/weather.js';
+import { fetchHorizon } from '#lib/server/horizon.js';
+import { timeZoneAt } from '#lib/server/flight-time.js';
+import { BoundedCache } from '#lib/server/bounded-cache.js';
+import type { SkyEvent } from '#lib/types.js';
 
 export type PredictionPayload = {
   event: SkyEvent;

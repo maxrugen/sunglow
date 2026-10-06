@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount } from 'svelte';
-    import { deviceId, dueRating, forgetRating, type PendingRating } from '$lib/rating-store';
-    import { errorMessageFrom } from '$lib/http';
+    import { deviceId, dueRating, forgetRating, type PendingRating } from '#lib/rating-store.js';
+    import { errorMessageFrom } from '#lib/http.js';
 
     const CHOICES = [
         { value: 1, label: 'Dull' },

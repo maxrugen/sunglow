@@ -1,5 +1,5 @@
-import airportsData from '$lib/data/airports.json';
-import type { Airport } from '$lib/types';
+import airportsData from '#lib/data/airports.json';
+import type { Airport } from '#lib/types.js';
 
 // Server-only so the ~570 KB dataset stays out of the client bundle.
 const airports = airportsData as Airport[];

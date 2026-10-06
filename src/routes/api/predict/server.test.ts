@@ -1,8 +1,9 @@
 import { describe, it, expect, vi } from 'vitest';
+import { mockEnv } from '#lib/server/test-env.js';
 
-vi.mock('$env/dynamic/private', () => ({ env: {} }));
+vi.mock('$app/env/private', () => mockEnv());
 const predictEvent = vi.fn();
-vi.mock('$lib/server/prediction', () => ({ predictEvent, PredictionError: class extends Error {} }));
+vi.mock('#lib/server/prediction.js', () => ({ predictEvent, PredictionError: class extends Error {} }));
 
 const { POST } = await import('./+server');
 

@@ -1,15 +1,12 @@
-/// <reference no-default-lib="true"/>
-/// <reference lib="esnext" />
-/// <reference lib="webworker" />
-/// <reference types="@sveltejs/kit" />
-import { build, files, version } from '$service-worker';
-
-const sw = self as unknown as ServiceWorkerGlobalScope;
+import { version } from '$app/env';
+import { immutable, assets } from '$app/manifest';
+import { self as sw } from '$app/service-worker';
 
 // `version` changes on every deploy, so a new build gets a fresh cache and the
 // old one (with chunk names that no longer exist) is dropped on activate.
 const CACHE = `sunglow-${version}`;
-const ASSETS = new Set([...build, ...files]);
+// Manifest paths are relative to the base path (the site root here).
+const ASSETS = new Set([...immutable, ...assets].map(({ path }) => `/${path}`));
 
 sw.addEventListener('install', (event) => {
   event.waitUntil(

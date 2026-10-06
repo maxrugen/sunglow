@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { env } from '$env/dynamic/private';
-import { SCORING_VERSION, type WeatherData } from '$lib/server/scoring';
-import type { SkyEvent } from '$lib/types';
+import * as env from '$app/env/private';
+import { SCORING_VERSION, type WeatherData } from '#lib/server/scoring.js';
+import type { SkyEvent } from '#lib/types.js';
 
 /** Ratings are accepted from the event until this long after it. */
 export const RATING_WINDOW_MS = 24 * 60 * 60 * 1000;

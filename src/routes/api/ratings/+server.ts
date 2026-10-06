@@ -1,8 +1,8 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { db } from '$lib/server/db';
-import { sunsetRatings } from '$lib/server/db/schema';
-import { inRatingWindow, ratingsConfigured, verifyRatingToken } from '$lib/server/ratings';
+import { db } from '#lib/server/db/index.js';
+import { sunsetRatings } from '#lib/server/db/schema.js';
+import { inRatingWindow, ratingsConfigured, verifyRatingToken } from '#lib/server/ratings.js';
 
 const DEVICE_ID = /^[A-Za-z0-9-]{8,64}$/;
 

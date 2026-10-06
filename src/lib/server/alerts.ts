@@ -1,8 +1,8 @@
-import { nextEvent, type PredictionPayload } from '$lib/server/prediction';
-import { timeZoneAt } from '$lib/server/flight-time';
-import type { PushPayload, SendOptions } from '$lib/server/webpush';
-import type { PushSubscriptionRow } from '$lib/server/db/schema';
-import type { SkyEvent } from '$lib/types';
+import { nextEvent, type PredictionPayload } from '#lib/server/prediction.js';
+import { timeZoneAt } from '#lib/server/flight-time.js';
+import type { PushPayload, SendOptions } from '#lib/server/webpush.js';
+import type { PushSubscriptionRow } from '#lib/server/db/schema.js';
+import type { SkyEvent } from '#lib/types.js';
 
 const HOUR_MS = 3600 * 1000;
 

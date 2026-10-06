@@ -1,6 +1,6 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { searchAirports } from '$lib/server/airports';
+import { searchAirports } from '#lib/server/airports.js';
 
 /** GET /api/airports?q=MUC → up to 8 matching airports. */
 export const GET: RequestHandler = ({ url }) => {

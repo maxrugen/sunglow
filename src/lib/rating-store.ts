@@ -1,4 +1,4 @@
-import type { ClientPrediction, SkyEvent } from '$lib/types';
+import type { ClientPrediction, SkyEvent } from '#lib/types.js';
 
 /** A viewed prediction that can be rated once its sunrise or sunset has happened. */
 export type PendingRating = {

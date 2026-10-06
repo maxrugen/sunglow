@@ -1,19 +1,19 @@
 import { json } from '@sveltejs/kit';
 import SunCalc from 'suncalc';
-import { evaluateInFlight } from '$lib/server/scoring';
+import { evaluateInFlight } from '#lib/server/scoring.js';
 import {
   interpolateGreatCircle,
   findEventWindows,
   bestWaypointPerSighting,
   computeSunSide
-} from '$lib/server/flight-route';
-import { airQualityAt, compositeAt, fetchAirQuality, fetchForecast, nearestIndex } from '$lib/server/weather';
-import { resolveFlightTimes, timeZoneAt } from '$lib/server/flight-time';
-import { airportByIata } from '$lib/server/airports';
-import { BoundedCache } from '$lib/server/bounded-cache';
-import type { WeatherData } from '$lib/server/scoring';
+} from '#lib/server/flight-route.js';
+import { airQualityAt, compositeAt, fetchAirQuality, fetchForecast, nearestIndex } from '#lib/server/weather.js';
+import { resolveFlightTimes, timeZoneAt } from '#lib/server/flight-time.js';
+import { airportByIata } from '#lib/server/airports.js';
+import { BoundedCache } from '#lib/server/bounded-cache.js';
+import type { WeatherData } from '#lib/server/scoring.js';
 import type { RequestHandler } from './$types';
-import type { EventWaypoint, FlightPredictionResponse, FlightSighting } from '$lib/types';
+import type { EventWaypoint, FlightPredictionResponse, FlightSighting } from '#lib/types.js';
 
 const cache = new BoundedCache<FlightPredictionResponse>(10 * 60 * 1000);
 

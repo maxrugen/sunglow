@@ -1,12 +1,12 @@
 import { json } from '@sveltejs/kit';
 import { eq } from 'drizzle-orm';
 import type { RequestHandler } from './$types';
-import { db } from '$lib/server/db';
-import { pushSubscriptions } from '$lib/server/db/schema';
-import { isAllowedPushEndpoint } from '$lib/server/webpush';
-import { pushRequestAuthorized } from '$lib/server/push-auth';
-import { parseAlertEvents } from '$lib/server/alerts';
-import { cleanLabel, parseLatLon, validPushKeys } from '$lib/server/validate';
+import { db } from '#lib/server/db/index.js';
+import { pushSubscriptions } from '#lib/server/db/schema.js';
+import { isAllowedPushEndpoint } from '#lib/server/webpush.js';
+import { pushRequestAuthorized } from '#lib/server/push-auth.js';
+import { parseAlertEvents } from '#lib/server/alerts.js';
+import { cleanLabel, parseLatLon, validPushKeys } from '#lib/server/validate.js';
 
 export const POST: RequestHandler = async ({ request }) => {
   if (!pushRequestAuthorized(request)) {

@@ -1,4 +1,4 @@
-import { env } from '$env/dynamic/private';
+import * as env from '$app/env/private';
 
 /**
  * Optional deterrent gate for the subscribe/unsubscribe routes. If SUBSCRIBE_TOKEN

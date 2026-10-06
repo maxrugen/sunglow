@@ -1,17 +1,17 @@
 <script lang="ts">
-    import LocationInput from '$lib/components/LocationInput.svelte';
-    import ResultsDisplay from '$lib/components/ResultsDisplay.svelte';
-    import PushSubscribeButton from '$lib/components/PushSubscribeButton.svelte';
-    import FlightInput from '$lib/components/FlightInput.svelte';
-    import FlightResultsDisplay from '$lib/components/FlightResultsDisplay.svelte';
-    import RatingPrompt from '$lib/components/RatingPrompt.svelte';
-    import { rememberForRating } from '$lib/rating-store';
+    import LocationInput from '#lib/components/LocationInput.svelte';
+    import ResultsDisplay from '#lib/components/ResultsDisplay.svelte';
+    import PushSubscribeButton from '#lib/components/PushSubscribeButton.svelte';
+    import FlightInput from '#lib/components/FlightInput.svelte';
+    import FlightResultsDisplay from '#lib/components/FlightResultsDisplay.svelte';
+    import RatingPrompt from '#lib/components/RatingPrompt.svelte';
+    import { rememberForRating } from '#lib/rating-store.js';
     import { onMount, tick, untrack } from 'svelte';
-    import { applyScoreTheme, resetScoreTheme, scoreLabel } from '$lib/score';
-    import { errorMessageFrom } from '$lib/http';
-    import { reverseGeocode } from '$lib/reverse-geocode';
-    import { toClientPrediction, type ClientPrediction, type FlightPredictionResponse, type SkyEvent } from '$lib/types';
-    import { EVENT_COPY, SKY_EVENTS, isSkyEvent } from '$lib/events';
+    import { applyScoreTheme, resetScoreTheme, scoreLabel } from '#lib/score.js';
+    import { errorMessageFrom } from '#lib/http.js';
+    import { reverseGeocode } from '#lib/reverse-geocode.js';
+    import { toClientPrediction, type ClientPrediction, type FlightPredictionResponse, type SkyEvent } from '#lib/types.js';
+    import { EVENT_COPY, SKY_EVENTS, isSkyEvent } from '#lib/events.js';
     import type { PageData } from './$types';
 
     let { data }: { data: PageData } = $props();

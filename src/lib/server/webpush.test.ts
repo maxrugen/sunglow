@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { mockEnv } from '#lib/server/test-env.js';
 
-vi.mock('$env/dynamic/private', () => ({ env: { VAPID_PUBLIC_KEY: 'pub', VAPID_PRIVATE_KEY: 'priv' } }));
+vi.mock('$app/env/private', () => mockEnv({ VAPID_PUBLIC_KEY: 'pub', VAPID_PRIVATE_KEY: 'priv' }));
 
 const sendNotification = vi.fn();
 vi.mock('web-push', () => ({ default: { setVapidDetails: vi.fn(), sendNotification } }));

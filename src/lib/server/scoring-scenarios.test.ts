@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { calculateWithDetails, evaluateInFlight, type WeatherData } from './scoring';
-import { scoreLabel } from '$lib/score';
+import { scoreLabel } from '#lib/score.js';
 
 /**
  * Reference skies with the label each should get. These pin the overall

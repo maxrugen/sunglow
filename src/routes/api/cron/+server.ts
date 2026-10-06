@@ -1,13 +1,13 @@
 import { json } from '@sveltejs/kit';
 import { and, eq, sql } from 'drizzle-orm';
 import type { RequestHandler } from './$types';
-import { env } from '$env/dynamic/private';
-import { dev } from '$app/environment';
-import { db } from '$lib/server/db';
-import { pushSubscriptions, type PushSubscriptionRow } from '$lib/server/db/schema';
-import { sendPush } from '$lib/server/webpush';
-import { predictEvent } from '$lib/server/prediction';
-import { runAlerts, type AlertConfig, type AlertDeps, type AlertKind, type AlertOutcome } from '$lib/server/alerts';
+import * as env from '$app/env/private';
+import { dev } from '$app/env';
+import { db } from '#lib/server/db/index.js';
+import { pushSubscriptions, type PushSubscriptionRow } from '#lib/server/db/schema.js';
+import { sendPush } from '#lib/server/webpush.js';
+import { predictEvent } from '#lib/server/prediction.js';
+import { runAlerts, type AlertConfig, type AlertDeps, type AlertKind, type AlertOutcome } from '#lib/server/alerts.js';
 
 export const config = { maxDuration: 60 };
 

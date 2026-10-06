@@ -1,5 +1,5 @@
 import SunCalc from 'suncalc';
-import type { EventWaypoint, FlightWaypoint, SeatSide, SkyEvent } from '$lib/types';
+import type { EventWaypoint, FlightWaypoint, SeatSide, SkyEvent } from '#lib/types.js';
 
 const DEG_TO_RAD = Math.PI / 180;
 const RAD_TO_DEG = 180 / Math.PI;
