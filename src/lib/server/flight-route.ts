@@ -1,5 +1,5 @@
 import SunCalc from 'suncalc';
-import type { FlightWaypoint, SunsetWaypoint } from '$lib/types';
+import type { EventWaypoint, FlightWaypoint, SeatSide, SkyEvent } from '$lib/types';
 
 const DEG_TO_RAD = Math.PI / 180;
 const RAD_TO_DEG = 180 / Math.PI;
@@ -76,81 +76,96 @@ export function interpolateGreatCircle(
   return waypoints;
 }
 
+const EVENTS: SkyEvent[] = ['sunrise', 'sunset'];
+
 /**
- * For each waypoint, compute the local sunset time and determine if the
- * plane is near the point around sunset. Returns waypoints where the
- * plane is within `windowMinutes` of local sunset.
+ * For each waypoint, compute the local sunrise and sunset and keep the
+ * waypoints where the plane is within `windowMinutes` of one of them.
+ * SunCalc works with absolute time and longitude, so the date line needs no
+ * special handling.
  */
-export function findSunsetWindows(
-  waypoints: FlightWaypoint[],
-  windowMinutes: number = 60
-): SunsetWaypoint[] {
-  const results: SunsetWaypoint[] = [];
+export function findEventWindows(waypoints: FlightWaypoint[], windowMinutes: number = 60): EventWaypoint[] {
+  const results: EventWaypoint[] = [];
 
   for (let i = 0; i < waypoints.length; i++) {
     const wp = waypoints[i];
-    const wpDate = new Date(wp.time);
-
+    let sunTimes;
     try {
-      const sunTimes = SunCalc.getTimes(wpDate, wp.lat, wp.lon);
-      if (!sunTimes?.sunset || isNaN(sunTimes.sunset.getTime())) continue;
-
-      const sunsetMs = sunTimes.sunset.getTime();
-      const offsetMs = Math.abs(wp.time - sunsetMs);
-      const offsetMinutes = offsetMs / (60 * 1000);
-
-      if (offsetMinutes <= windowMinutes) {
-        // Compute sun position at sunset time at this location
-        const sunPos = SunCalc.getPosition(sunTimes.sunset, wp.lat, wp.lon);
-        // SunCalc azimuth: 0 = south, negative = east, positive = west
-        // Convert to compass bearing: 0 = north, clockwise
-        const sunAzimuth = ((sunPos.azimuth * RAD_TO_DEG) + 180) % 360;
-
-        // Compute plane heading (bearing to next waypoint, or from previous)
-        let planeHeading: number;
-        if (i < waypoints.length - 1) {
-          planeHeading = bearing(wp.lat, wp.lon, waypoints[i + 1].lat, waypoints[i + 1].lon);
-        } else if (i > 0) {
-          planeHeading = bearing(waypoints[i - 1].lat, waypoints[i - 1].lon, wp.lat, wp.lon);
-        } else {
-          planeHeading = 0;
-        }
-
-        results.push({
-          ...wp,
-          sunsetTime: sunsetMs,
-          offsetMinutes: Math.round(offsetMinutes),
-          sunAzimuth: Math.round(sunAzimuth),
-          planeHeading: Math.round(planeHeading)
-        });
-      }
+      sunTimes = SunCalc.getTimes(new Date(wp.time), wp.lat, wp.lon);
     } catch {
-      // SunCalc can fail for extreme latitudes (polar night/day)
-      continue;
+      continue; // SunCalc can fail for extreme latitudes (polar night/day)
+    }
+
+    for (const event of EVENTS) {
+      const time: Date | undefined = sunTimes?.[event];
+      if (!time || isNaN(time.getTime())) continue;
+      const offsetMinutes = Math.abs(wp.time - time.getTime()) / (60 * 1000);
+      if (offsetMinutes > windowMinutes) continue;
+
+      // SunCalc azimuth: 0 = south, negative = east, positive = west → compass bearing
+      const sunPos = SunCalc.getPosition(time, wp.lat, wp.lon);
+      const sunAzimuth = ((sunPos.azimuth * RAD_TO_DEG) + 180 + 360) % 360;
+
+      // Plane heading: bearing to the next waypoint, or from the previous one
+      let planeHeading = 0;
+      if (i < waypoints.length - 1) {
+        planeHeading = bearing(wp.lat, wp.lon, waypoints[i + 1].lat, waypoints[i + 1].lon);
+      } else if (i > 0) {
+        planeHeading = bearing(waypoints[i - 1].lat, waypoints[i - 1].lon, wp.lat, wp.lon);
+      }
+
+      results.push({
+        ...wp,
+        event,
+        eventTime: time.getTime(),
+        offsetMinutes: Math.round(offsetMinutes),
+        sunAzimuth: Math.round(sunAzimuth),
+        planeHeading: Math.round(planeHeading),
+      });
     }
   }
 
   return results;
 }
 
+/** Sun within this many degrees of the nose or tail: both windows see it about equally. */
+const ALONG_TRACK_DEG = 20;
+
 /**
- * Determine which side of the plane faces the sun at sunset.
- * Returns 'left' or 'right'.
- *
- * The relative angle is computed as: (sunAzimuth - planeHeading + 360) % 360.
- * 0-180° = sun is to the right; 180-360° = sun is to the left.
+ * Which side of the plane faces the sun. The relative angle is
+ * (sunAzimuth - planeHeading + 360) % 360: 0–180° is right, 180–360° is left,
+ * and near 0° or 180° the sun is ahead of or behind the plane.
  */
-export function computeSunSide(planeHeading: number, sunAzimuth: number): 'left' | 'right' {
-  const relative = ((sunAzimuth - planeHeading) + 360) % 360;
+export function computeSunSide(planeHeading: number, sunAzimuth: number): SeatSide {
+  const relative = ((sunAzimuth - planeHeading) % 360 + 360) % 360;
+  if (relative < ALONG_TRACK_DEG || relative > 360 - ALONG_TRACK_DEG || Math.abs(relative - 180) < ALONG_TRACK_DEG) {
+    return 'either';
+  }
   return relative > 180 ? 'left' : 'right';
 }
 
+/** Waypoints more than this far apart (in flight time) belong to different sightings. */
+const SIGHTING_GAP_MS = 45 * 60 * 1000;
+
 /**
- * Pick the best sunset waypoint: the one closest in time to local sunset.
+ * One waypoint per sighting: consecutive matching waypoints of the same event
+ * form a group (so a 24 h flight with two sunsets yields two), and each group
+ * keeps the waypoint closest to its local event. Sorted by time.
  */
-export function bestSunsetWaypoint(waypoints: SunsetWaypoint[]): SunsetWaypoint | null {
-  if (waypoints.length === 0) return null;
-  return waypoints.reduce((best, wp) =>
-    wp.offsetMinutes < best.offsetMinutes ? wp : best
-  );
+export function bestWaypointPerSighting(windows: EventWaypoint[]): EventWaypoint[] {
+  const best: EventWaypoint[] = [];
+  for (const event of EVENTS) {
+    const ofEvent = windows.filter((w) => w.event === event).sort((a, b) => a.time - b.time);
+    let group: EventWaypoint[] = [];
+    const flush = () => {
+      if (group.length) best.push(group.reduce((b, w) => (w.offsetMinutes < b.offsetMinutes ? w : b)));
+      group = [];
+    };
+    for (const w of ofEvent) {
+      if (group.length && w.time - group[group.length - 1].time > SIGHTING_GAP_MS) flush();
+      group.push(w);
+    }
+    flush();
+  }
+  return best.sort((a, b) => a.time - b.time);
 }

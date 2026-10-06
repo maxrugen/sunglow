@@ -265,7 +265,7 @@
 
     <div class="actions">
         <button class="btn primary" onclick={submit}>
-            Predict In-Flight Sunset
+            Predict In-Flight Sun Views
         </button>
         <button class="btn link" onclick={onSwitchMode}>
             ← Back to location mode

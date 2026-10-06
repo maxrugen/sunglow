@@ -24,8 +24,6 @@ export type PredictionPayload = {
   /** UTC epoch seconds; null where the event doesn't occur (polar day/night). */
   timings: {
     eventEpochSec: number | null;
-    /** @deprecated Kept for clients from before sunrise mode; equals eventEpochSec for sunsets, null otherwise. */
-    sunsetEpochSec: number | null;
     goldenHourEpochSec: number | null;
   };
   used: {
@@ -105,11 +103,6 @@ export function nextEvent(now: Date, latitude: number, longitude: number, event:
   return { event, day, time: next.time, goldenHour: next.goldenHour };
 }
 
-/** Tonight's sunset, or tomorrow's once tonight's afterglow has passed. */
-export function upcomingSunset(now: Date, latitude: number, longitude: number) {
-  const { day, time, goldenHour } = nextEvent(now, latitude, longitude, 'sunset');
-  return { day, sunset: time, goldenHour };
-}
 
 /** Carries an HTTP status so the route can translate upstream failures. */
 export class PredictionError extends Error {
@@ -223,7 +216,6 @@ export async function predictEvent({
     day: upcoming.day,
     timings: {
       eventEpochSec: eventSec,
-      sunsetEpochSec: event === 'sunset' ? eventSec : null,
       goldenHourEpochSec: upcoming.goldenHour ? Math.floor(upcoming.goldenHour.getTime() / 1000) : null,
     },
     used: { epochSec: selectedEpochSec, latitude, longitude, utcOffsetSeconds },
@@ -231,9 +223,4 @@ export async function predictEvent({
 
   cacheSet(cacheKey, payload);
   return payload;
-}
-
-/** Sunset prediction (the original entry point, used by sunset-only callers). */
-export function predictSunset(coords: { latitude: number; longitude: number }): Promise<PredictionPayload> {
-  return predictEvent({ ...coords, event: 'sunset' });
 }

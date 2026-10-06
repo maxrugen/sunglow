@@ -1,6 +1,7 @@
 <script lang="ts">
-    import type { FlightPredictionResponse } from '$lib/types';
+    import type { FlightPredictionResponse, FlightSighting } from '$lib/types';
     import { scoreLabel } from '$lib/score';
+    import { EVENT_COPY } from '$lib/events';
 
     interface Props {
         prediction?: FlightPredictionResponse | null;
@@ -9,26 +10,33 @@
 
     let { prediction = null, onBack }: Props = $props();
 
-    let score = $derived(Number(prediction?.qualityScore ?? 0));
-    let description = $derived(scoreLabel(score));
+    let sightings = $derived(prediction?.sightings ?? []);
+    // When sunrise and sunset fall on different sides, say so up front.
+    let sideSummary = $derived.by(() => {
+        const sided = sightings.filter((s) => s.seatSide !== 'either');
+        if (sided.length < 2 || new Set(sided.map((s) => s.seatSide)).size < 2) return '';
+        return sided.map((s) => `${s.seatSide === 'left' ? 'Left' : 'Right'} side for the ${s.event}`).join(', ') + '.';
+    });
 
     function formatUTCTime(isoStr: string | undefined) {
         if (!isoStr) return '--';
         try {
-            return new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }).format(new Date(isoStr));
+            return new Intl.DateTimeFormat(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }).format(new Date(isoStr));
         } catch {
             return '--';
         }
     }
 
-    function buildExplanation(p: FlightPredictionResponse) {
-        const fx: any = p?.explanation?.factors;
+    function buildExplanation(s: FlightSighting) {
+        const fx: any = s.explanation?.factors;
         if (!fx) return '';
+        const noun = EVENT_COPY[s.event].noun;
+        const score = s.qualityScore ?? 0;
 
         const parts: string[] = [];
         // Low cloud (inverted for flight)
         if (fx.lowCloud?.adjustment > 0) {
-            parts.push('Low clouds below the plane create a beautiful cloud-top sunset canvas.');
+            parts.push(`Low clouds below the plane create a cloud-top canvas for the ${noun}.`);
         }
         // High clouds
         if (fx.highCloud) {
@@ -52,95 +60,96 @@
         // Visibility
         if (fx.visibility?.meters && fx.visibility.meters < 3000) parts.push('Low surface visibility suggests hazy conditions.');
         // Aerosol
-        if (fx.aod?.value > 0.15 && fx.aod?.value < 0.4 && fx.aod?.bonus > 0) parts.push('Moderate aerosols can enhance sunset vibrancy.');
+        if (fx.aod?.value > 0.15 && fx.aod?.value < 0.4 && fx.aod?.bonus > 0) parts.push(`Moderate aerosols can enhance ${noun} vibrancy.`);
         // Pressure
         if (fx.pressureTrend?.hPa > 1) parts.push('Rising pressure hints at clearing skies.');
 
         if (parts.length === 0) {
-            if (score >= 80) return 'Conditions look excellent for a stunning in-flight sunset.';
+            if (score >= 80) return `Conditions look excellent for a stunning in-flight ${noun}.`;
             if (score >= 65) return 'Good conditions for color from the window seat.';
             if (score >= 40) return 'Moderate conditions — some color possible.';
-            return 'Conditions may limit the sunset view from the plane.';
+            return `Conditions may limit the ${noun} view from the plane.`;
         }
         return parts.join(' ');
     }
 </script>
 
 <section class="card">
-    {#if prediction && prediction.sunsetDuringFlight}
-        {#if prediction.qualityScore != null}
-            <h2>
-                In-Flight Sunset: <span class="accent">{score}%</span>
-                <small class="badge">{description}</small>
-            </h2>
-        {:else}
-            <h2>Sunset During Your Flight</h2>
-            <p class="message">No weather forecast is available for this date yet, so there is no quality score. The seat recommendation is still valid.</p>
+    {#if prediction?.route}
+        <p class="route">
+            <strong>{prediction.route.departure.iata}</strong> → <strong>{prediction.route.arrival.iata}</strong>
+        </p>
+    {/if}
+
+    {#if sightings.length === 0}
+        <h2>No Sunrise or Sunset During This Flight</h2>
+        <p class="message">{prediction?.message || 'The sun neither rises nor sets during this flight.'}</p>
+    {:else}
+        {#if sideSummary}
+            <p class="side-summary">{sideSummary}</p>
         {/if}
 
-        {#if prediction.route}
-            <p class="route">
-                <strong>{prediction.route.departure.iata}</strong> → <strong>{prediction.route.arrival.iata}</strong>
-            </p>
-        {/if}
+        {#each sightings as s (s.timeUTC + s.event)}
+            {@const copy = EVENT_COPY[s.event]}
+            <div class="sighting">
+                {#if s.qualityScore != null}
+                    <h2>
+                        In-Flight {copy.title}: <span class="accent">{s.qualityScore}%</span>
+                        <small class="badge">{scoreLabel(s.qualityScore)}</small>
+                    </h2>
+                {:else}
+                    <h2>{copy.title} During Your Flight</h2>
+                    <p class="message">No weather forecast is available for this date yet, so there is no quality score. The seat recommendation is still valid.</p>
+                {/if}
 
-        <div class="highlight">
-            <div class="seat-rec">
-                <span class="seat-icon">{prediction.seatSide === 'left' ? '◀' : '▶'}</span>
-                <div>
-                    <strong>Sit on the {prediction.seatSide} side</strong>
-                    <small>for the best sunset view</small>
+                <div class="highlight">
+                    <div class="seat-rec">
+                        <span class="seat-icon" aria-hidden="true">{s.seatSide === 'left' ? '◀' : s.seatSide === 'right' ? '▶' : '▲'}</span>
+                        <div>
+                            <strong>{s.seatSide === 'either' ? 'Either side works' : `Sit on the ${s.seatSide} side`}</strong>
+                            <small>{s.seatRecommendation}</small>
+                        </div>
+                    </div>
                 </div>
-            </div>
-        </div>
 
-        <div class="metrics">
-            <div class="row">
-                <span>Sunset time</span>
-                <strong>{formatUTCTime(prediction.sunsetTimeUTC)}</strong>
-            </div>
-            <div class="row">
-                <span>Sunset location</span>
-                <strong>{prediction.sunsetLocation ?? '--'}</strong>
-            </div>
-            {#if prediction.confidence !== undefined}
-                <div class="row">
-                    <span>Confidence</span>
-                    <strong>{prediction.confidence}%</strong>
+                <div class="metrics">
+                    <div class="row">
+                        <span>{copy.title} time</span>
+                        <strong>{formatUTCTime(s.timeUTC)}</strong>
+                    </div>
+                    <div class="row">
+                        <span>Plane position</span>
+                        <strong>{s.location}</strong>
+                    </div>
+                    {#if s.confidence !== undefined}
+                        <div class="row">
+                            <span>Confidence</span>
+                            <strong>{s.confidence}%</strong>
+                        </div>
+                    {/if}
+                    <div class="row">
+                        <span>Time offset</span>
+                        <strong>{s.waypoint.offsetMinutes} min from {copy.noun}</strong>
+                    </div>
+                    <div class="row">
+                        <span>Sun azimuth</span>
+                        <strong>{s.waypoint.sunAzimuth}°</strong>
+                    </div>
+                    <div class="row">
+                        <span>Plane heading</span>
+                        <strong>{s.waypoint.planeHeading}°</strong>
+                    </div>
                 </div>
-            {/if}
-            {#if prediction.sunsetWaypoint}
-                <div class="row">
-                    <span>Time offset</span>
-                    <strong>{prediction.sunsetWaypoint.offsetMinutes} min from sunset</strong>
-                </div>
-                <div class="row">
-                    <span>Sun azimuth</span>
-                    <strong>{prediction.sunsetWaypoint.sunAzimuth}°</strong>
-                </div>
-                <div class="row">
-                    <span>Plane heading</span>
-                    <strong>{prediction.sunsetWaypoint.planeHeading}°</strong>
-                </div>
-            {/if}
-        </div>
 
-        {#if prediction.explanation?.factors}
-            <div class="explain">
-                <h3>Why this score?</h3>
-                <p>{buildExplanation(prediction)}</p>
-                <p class="note">Note: Weather data is based on surface-level forecasts. Actual conditions at cruise altitude may differ.</p>
+                {#if s.explanation?.factors}
+                    <div class="explain">
+                        <h3>Why this score?</h3>
+                        <p>{buildExplanation(s)}</p>
+                    </div>
+                {/if}
             </div>
-        {/if}
-
-    {:else if prediction}
-        <h2>No Sunset During Flight</h2>
-        {#if prediction.route}
-            <p class="route">
-                <strong>{prediction.route.departure.iata}</strong> → <strong>{prediction.route.arrival.iata}</strong>
-            </p>
-        {/if}
-        <p class="message">{prediction.message || 'The sun does not set during this flight.'}</p>
+        {/each}
+        <p class="note">Note: Weather data is based on surface-level forecasts. Actual conditions at cruise altitude may differ.</p>
     {/if}
 
     <button class="btn back-btn" onclick={onBack}>
@@ -164,6 +173,8 @@
     .accent { color: var(--text-accent); }
     .badge { font-size: 0.9rem; padding: 0.25rem 0.5rem; border-radius: 999px; border: 1px solid currentColor; opacity: 0.9; }
     .route { margin: 0 0 0.75rem; font-size: 1.1rem; opacity: 0.95; }
+    .side-summary { margin: 0 0 0.75rem; font-weight: 600; color: var(--text-accent); }
+    .sighting + .sighting { margin-top: 1.25rem; padding-top: 1.25rem; border-top: 1px solid rgba(255,255,255,0.18); }
     .highlight { margin-bottom: 1rem; }
     .seat-rec {
         display: flex;
@@ -183,7 +194,7 @@
     .message { opacity: 0.9; margin: 0.5rem 0; }
     .explain { margin-top: 1rem; opacity: 0.95; }
     .explain h3 { margin: 0 0 0.5rem; font-size: 1rem; }
-    .note { font-size: 0.85rem; opacity: 0.7; margin: 0.5rem 0 0; font-style: italic; }
+    .note { font-size: 0.85rem; opacity: 0.7; margin: 1rem 0 0; font-style: italic; }
     .back-btn {
         margin-top: 1rem;
         width: 100%;

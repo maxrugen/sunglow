@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import SunCalc from 'suncalc';
-import { nextEvent, predictEvent, predictSunset, upcomingSunset } from './prediction';
+import { nextEvent, predictEvent } from './prediction';
 
 // New York, 2026-06-10: local midnight is 04:00Z, sunset ≈ 00:30Z on the 11th.
 const NYC = { latitude: 40.71, longitude: -74.0 };
@@ -65,9 +65,9 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('predictSunset()', () => {
+describe('predictEvent() for sunset', () => {
   it('scores the hour nearest the real (UTC) sunset', async () => {
-    const payload = await predictSunset(NYC);
+    const payload = await predictEvent({ ...NYC, event: 'sunset' });
     const sunsetSec = SunCalc.getTimes(new Date(), NYC.latitude, NYC.longitude).sunset.getTime() / 1000;
 
     expect(Math.abs(payload.used.epochSec - sunsetSec)).toBeLessThanOrEqual(1800);
@@ -76,14 +76,14 @@ describe('predictSunset()', () => {
   });
 
   it('takes AOD from the air-quality API', async () => {
-    const payload = await predictSunset({ latitude: 40.72, longitude: -74.0 });
+    const payload = await predictEvent({ latitude: 40.72, longitude: -74.0, event: 'sunset' });
     expect(payload.weatherData.aod).toBeCloseTo(0.25);
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes('aerosol_optical_depth'))).toBe(true);
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes('daily=aerosol'))).toBe(false);
   });
 
   it('includes clouds toward the setting sun in the score', async () => {
-    const payload = await predictSunset({ latitude: 40.75, longitude: -74.0 });
+    const payload = await predictEvent({ latitude: 40.75, longitude: -74.0, event: 'sunset' });
     expect(payload.weatherData.horizonCloud).toBeCloseTo(80);
     expect(payload.weatherData.horizonAzimuthDeg).toBeGreaterThan(270);
     expect((payload.explanation.factors.horizon as { net: number }).net).toBeLessThan(0);
@@ -91,9 +91,9 @@ describe('predictSunset()', () => {
 
   it('serves repeat lookups from the cache without refetching', async () => {
     const coords = { latitude: 40.73, longitude: -74.0 };
-    await predictSunset(coords);
+    await predictEvent({ ...coords, event: 'sunset' });
     const callsAfterFirst = fetchMock.mock.calls.length;
-    await predictSunset(coords);
+    await predictEvent({ ...coords, event: 'sunset' });
     expect(fetchMock.mock.calls.length).toBe(callsAfterFirst);
   });
 
@@ -101,25 +101,25 @@ describe('predictSunset()', () => {
     // 02:00Z on the 11th is 22:00 EDT on the 10th, ~1.5 h after sunset.
     vi.setSystemTime(new Date('2026-06-11T02:00:00Z'));
     const coords = { latitude: 40.74, longitude: -74.0 };
-    const payload = await predictSunset(coords);
+    const payload = await predictEvent({ ...coords, event: 'sunset' });
     const tomorrow = SunCalc.getTimes(new Date('2026-06-11T16:00:00Z'), coords.latitude, coords.longitude).sunset;
 
     expect(payload.day).toBe('tomorrow');
-    expect(payload.timings.sunsetEpochSec).toBe(Math.floor(tomorrow.getTime() / 1000));
+    expect(payload.timings.eventEpochSec).toBe(Math.floor(tomorrow.getTime() / 1000));
     expect(Math.abs(payload.used.epochSec - tomorrow.getTime() / 1000)).toBeLessThanOrEqual(1800);
   });
 });
 
-describe('upcomingSunset()', () => {
+describe('nextEvent() for sunset', () => {
   it('keeps tonight during the afterglow', () => {
     const sunset = SunCalc.getTimes(new Date('2026-06-10T16:00:00Z'), NYC.latitude, NYC.longitude).sunset;
     const now = new Date(sunset.getTime() + 20 * 60 * 1000);
-    expect(upcomingSunset(now, NYC.latitude, NYC.longitude).day).toBe('today');
+    expect(nextEvent(now, NYC.latitude, NYC.longitude, 'sunset').day).toBe('today');
   });
 
   it('has no sunset during polar day', () => {
-    const r = upcomingSunset(new Date('2026-06-21T12:00:00Z'), 78.2, 15.6); // Svalbard
-    expect(r.sunset).toBeNull();
+    const r = nextEvent(new Date('2026-06-21T12:00:00Z'), 78.2, 15.6, 'sunset'); // Svalbard
+    expect(r.time).toBeNull();
     expect(r.day).toBe('today');
   });
 });
@@ -181,7 +181,6 @@ describe('predictEvent() for sunrise', () => {
     expect(payload.event).toBe('sunrise');
     expect(payload.day).toBe('tomorrow');
     expect(payload.timings.eventEpochSec).toBe(Math.floor(sunrise.getTime() / 1000));
-    expect(payload.timings.sunsetEpochSec).toBeNull();
     expect(Math.abs(payload.used.epochSec - sunrise.getTime() / 1000)).toBeLessThanOrEqual(1800);
     expect(payload.weatherData.horizonAzimuthDeg).toBeGreaterThan(50);
     expect(payload.weatherData.horizonAzimuthDeg).toBeLessThan(130);

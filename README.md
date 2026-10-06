@@ -1,14 +1,14 @@
 ## Sunglow
 
-Sunset Quality Prediction web app built with SvelteKit and TypeScript. It estimates how good tonight's sunset will be for a given location using weather data, solar geometry, and a heuristic scoring model. It can also predict whether you'll see a sunset during a flight and which side of the plane to sit on.
+Sunset and sunrise quality prediction web app built with SvelteKit and TypeScript. It estimates how good the next sunset or sunrise will be for a given location using weather data, solar geometry, and a heuristic scoring model. It can also predict whether you'll see a sunrise or sunset during a flight and which side of the plane to sit on.
 
 ### Features
 - Predicts **sunset or sunrise** quality (switch in Location mode) with a confidence score and human‑readable explanation
-- **In‑flight sunset prediction**: enter departure/arrival airports and times to find out if you'll catch a sunset mid‑flight, which side of the plane to sit on, and how good it will be
+- **In‑flight sunrise/sunset prediction**: enter departure/arrival airports and times to find out if you'll catch a sunrise or sunset mid‑flight, which side of the plane to sit on, and how good it will be
 - Airport search across 5,469 worldwide airports (IATA code, city, or name)
 - Optional flight number lookup via AviationStack API
-- Great‑circle route interpolation with sunset window detection along the flight path
-- Seat side recommendation based on sun azimuth vs. plane heading
+- Great‑circle route interpolation with sunrise/sunset window detection along the flight path (a very long flight can show several)
+- Seat side recommendation based on sun azimuth vs. plane heading ("either side" when the sun is within 20° of the nose or tail)
 - Adapted in‑flight scoring model (cloud‑top views as bonus, reduced surface penalties)
 - Uses the actual sunrise/sunset time (SunCalc) to pick the forecast hour; once today's event has passed (+30 min for sunset, +15 min for sunrise) it switches to tomorrow's
 - **Sunset alerts**: opt‑in Web Push notification ~2 hours before a great sunset at your saved location
@@ -88,11 +88,11 @@ npm run test:watch # watch mode
 3) The server:
    - Looks up airports from a static database of 5,469 worldwide airports
    - Interpolates the great‑circle route at 15‑minute intervals using spherical linear interpolation (Slerp)
-   - At each waypoint, computes local sunset time via SunCalc and identifies waypoints within 60 minutes of sunset
-   - Picks the best waypoint (closest to actual sunset), fetches weather for that location from Open‑Meteo
+   - At each waypoint, computes local sunrise and sunset via SunCalc and keeps waypoints within 60 minutes of one
+   - Groups consecutive matches into sightings and picks each one's best waypoint (closest to the event), then fetches weather there from Open‑Meteo
    - Scores using `evaluateInFlight` — an adapted model where low clouds are a bonus (cloud‑top views), PM2.5 is ignored, and surface penalties are reduced
    - Computes which side of the plane faces the sun (sun azimuth vs. plane heading)
-4) The client displays the score, seat recommendation, sunset time/location, confidence, and an explanation.
+4) The client shows one section per sighting: score, seat recommendation, time, plane position, confidence and an explanation, plus a summary when sunrise and sunset are on different sides.
 
 ### Scoring model
 Core logic lives in:
@@ -135,7 +135,7 @@ Response (shape abbreviated):
   "confidence": 0-100,
   "explanation": { "factors": { /* human-readable factor details */ } },
   "day": "today", // local date of the event: "today" or "tomorrow"
-  "timings": { "eventEpochSec": 1730003000, "goldenHourEpochSec": 1730000400 }, // golden hour start (sunset) or end (sunrise); sunsetEpochSec is deprecated
+  "timings": { "eventEpochSec": 1730003000, "goldenHourEpochSec": 1730000400 }, // golden hour start (sunset) or end (sunrise)
   "used": {
     "epochSec": 1730000000, // UTC epoch of the scored hour
     "latitude": 52.52,
@@ -174,14 +174,19 @@ Times without an offset are local wall‑clock times at each airport (as printed
 Response (shape abbreviated):
 ```json
 {
-  "sunsetDuringFlight": true,
-  "qualityScore": 81,
-  "confidence": 60,
-  "seatSide": "left",
-  "seatRecommendation": "Sit on the left side of the plane for the best sunset view.",
-  "sunsetTimeUTC": "2026-04-12T18:01:00.000Z",
-  "sunsetLocation": "49.1°N, 12.3°E",
-  "explanation": { "factors": { } },
+  "sightings": [
+    {
+      "event": "sunset", // or "sunrise"
+      "qualityScore": 81,
+      "confidence": 60,
+      "seatSide": "left", // "left" | "right" | "either"
+      "seatRecommendation": "Sit on the left side of the plane for the best sunset view.",
+      "timeUTC": "2026-04-12T18:01:00.000Z",
+      "location": "49.1°N, 12.3°E",
+      "explanation": { "factors": { } },
+      "waypoint": { "offsetMinutes": 4, "sunAzimuth": 284, "planeHeading": 25 }
+    }
+  ],
   "route": {
     "departure": { "iata": "MUC", "name": "Munich", "lat": 48.35, "lon": 11.79 },
     "arrival": { "iata": "DRS", "name": "Dresden", "lat": 51.13, "lon": 13.77 }
@@ -189,7 +194,7 @@ Response (shape abbreviated):
 }
 ```
 
-If no sunset occurs during the flight, returns `sunsetDuringFlight: false` with a message.
+`sightings` is in time order. If there is no sunrise or sunset during the flight, it is empty and a `message` explains why.
 
 #### Airport Search
 `GET /api/airports?q=munich` → up to 8 airports (exact IATA match, then IATA prefix, then city/name substring). Runs server‑side so the airport dataset isn't shipped to the browser.
@@ -216,10 +221,10 @@ If no sunset occurs during the flight, returns `sunsetDuringFlight: false` with 
   - Keyboard navigation and validation
 
 - `src/lib/components/FlightResultsDisplay.svelte`
-  - Shows in‑flight sunset score, seat side recommendation with icon
-  - Displays sunset time, location, confidence, sun azimuth, plane heading
+  - One section per sunrise/sunset sighting: score, seat side recommendation with icon
+  - Displays event time, plane position, confidence, sun azimuth, plane heading
   - Natural‑language explanation of scoring factors
-  - Handles both "sunset during flight" and "no sunset" states
+  - Summary line when sightings fall on different sides; "no sunrise or sunset" state
 
 - `src/routes/+page.svelte`
   - Location/Flight mode toggle
@@ -249,7 +254,7 @@ src/
       LocationInput.svelte        # city/geolocation search
       ResultsDisplay.svelte        # location sunset results
       FlightInput.svelte           # airport search + flight form
-      FlightResultsDisplay.svelte  # flight sunset results
+      FlightResultsDisplay.svelte  # flight sunrise/sunset results
       PushSubscribeButton.svelte   # opt-in sunset alerts
     data/
       airports.json                # 5,469 airports (OurAirports)
@@ -259,7 +264,7 @@ src/
       prediction.ts                # location prediction (shared by API, deep links, cron)
       airports.ts                  # airport lookup + search
       horizon.ts                   # cloud sampling toward the setting sun
-      flight-route.ts              # great-circle interpolation, sunset windows, seat side
+      flight-route.ts              # great-circle interpolation, sunrise/sunset windows, seat side
       flight-time.ts               # airport-local times -> UTC
       webpush.ts, push-auth.ts     # Web Push sending + subscribe gate
       db/                          # Drizzle schema + Neon client
