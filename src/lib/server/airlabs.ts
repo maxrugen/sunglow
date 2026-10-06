@@ -1,5 +1,5 @@
-import { env } from '$env/dynamic/private';
-import { BoundedCache } from '$lib/server/bounded-cache';
+import * as env from '$app/env/private';
+import { BoundedCache } from '#lib/server/bounded-cache.js';
 
 /**
  * Flight timetables from AirLabs' routes database: which flights run on a

@@ -1,8 +1,8 @@
 <script lang="ts">
     import { onMount } from 'svelte';
-    import { env } from '$env/dynamic/public';
-    import { EVENT_COPY, SKY_EVENTS } from '$lib/events';
-    import type { SkyEvent } from '$lib/types';
+    import * as env from '$app/env/public';
+    import { EVENT_COPY, SKY_EVENTS } from '#lib/events.js';
+    import type { SkyEvent } from '#lib/types.js';
 
     interface Props {
         /** The location to attach to the subscription (from the current prediction). */

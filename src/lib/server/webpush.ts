@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import webpush from 'web-push';
-import { env } from '$env/dynamic/private';
+import * as env from '$app/env/private';
 import { db } from './db';
 import { pushSubscriptions, type PushSubscriptionRow } from './db/schema';
 

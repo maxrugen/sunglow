@@ -1,9 +1,9 @@
-import { env } from '$env/dynamic/private';
+import * as env from '$app/env/private';
 import type { PageServerLoad } from './$types';
-import { predictEvent } from '$lib/server/prediction';
-import { createRatingToken } from '$lib/server/ratings';
-import { cleanLabel, parseLatLon } from '$lib/server/validate';
-import type { SkyEvent } from '$lib/types';
+import { predictEvent } from '#lib/server/prediction.js';
+import { createRatingToken } from '#lib/server/ratings.js';
+import { cleanLabel, parseLatLon } from '#lib/server/validate.js';
+import type { SkyEvent } from '#lib/types.js';
 
 /**
  * Server-render a prediction for deep links like /?lat=…&lon=…&label=…&event=sunrise

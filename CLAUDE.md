@@ -17,9 +17,11 @@ npm run db:push      # drizzle-kit: push schema to the database
 
 Weather and geocoding APIs are public. Push alerts need `DATABASE_URL` (Neon), VAPID keys and `CRON_SECRET`; finding flights by number/route needs `AIRLABS_API_KEY`. See `.env.example`.
 
+Environment variables must be declared in `src/env.ts` (`defineEnvVars`); SvelteKit 3 only exposes declared ones. Server code reads them via `import * as env from '$app/env/private'` (`$app/env/public` for `PUBLIC_*`); tests mock that module with `mockEnv()` from `src/lib/server/test-env.ts`.
+
 ## Architecture
 
-Sunglow is a SvelteKit app (Svelte 5, runes) that predicts sunset and sunrise quality for a location, and sunset quality during a flight. It's deployed to Vercel with `@sveltejs/adapter-vercel` on Node.js 24.x.
+Sunglow is a SvelteKit 3 app (Svelte 5, runes, Vite 8) that predicts sunset and sunrise quality for a location, and sunset quality during a flight. It's deployed to Vercel with `@sveltejs/adapter-vercel` on Node.js 24.x; kit config lives in `vite.config.js` (there is no `svelte.config.js`). Imports use `#lib/…` with file extensions (`package.json` `imports`), not `$lib`.
 
 ### Location prediction
 
@@ -39,7 +41,7 @@ Sunglow is a SvelteKit app (Svelte 5, runes) that predicts sunset and sunrise qu
 
 ### Push alerts
 
-- `PushSubscribeButton.svelte` subscribes via `src/service-worker.ts` and POSTs to `/api/push/subscribe` with `events: { sunset, sunrise }` (Neon via Drizzle, `src/lib/server/db/`); its checkboxes call `/api/push/preferences`, which only changes the flags. Re-subscribing clears dedup dates only if the location changed.
+- `PushSubscribeButton.svelte` subscribes via `src/service-worker/index.ts` and POSTs to `/api/push/subscribe` with `events: { sunset, sunrise }` (Neon via Drizzle, `src/lib/server/db/`); its checkboxes call `/api/push/preferences`, which only changes the flags. Re-subscribing clears dedup dates only if the location changed.
 - `/api/cron` runs hourly via a cron-job.org job (Vercel Hobby cron is only daily; GitHub Actions schedules ran hours late, so `cron.yml` is manual-only now). Logic lives in `src/lib/server/alerts.ts`:
   - `alertsDue()` (pure) returns due kinds: `sunset` (2–3 h before), `sunrise-evening` (20:00–23:00 local, tomorrow's sunrise), `sunrise-morning` (1–2 h before). Events come from `nextEvent()`; dedup keys are the event's local date in `lastNotifiedDate` / `lastSunriseEveningDate` / `lastSunriseMorningDate`.
   - `runAlerts()` predicts, then **claims** the alert (`UPDATE … WHERE col IS DISTINCT FROM key RETURNING`) before sending, so overlapping runs can't double-send; below-threshold results are claimed too, failed sends are released for retry.

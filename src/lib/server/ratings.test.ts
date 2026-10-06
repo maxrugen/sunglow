@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { mockEnv } from '#lib/server/test-env.js';
 
-const env: Record<string, string | undefined> = {};
-vi.mock('$env/dynamic/private', () => ({ env }));
+const env = mockEnv();
+vi.mock('$app/env/private', () => env);
 
 const { createRatingToken, verifyRatingToken, inRatingWindow, ratingsConfigured } = await import('./ratings');
 const { SCORING_VERSION } = await import('./scoring');

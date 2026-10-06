@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import fixture from '$lib/server/__fixtures__/airlabs-routes-IAD-SLC.json';
+import { mockEnv } from '#lib/server/test-env.js';
+import fixture from '#lib/server/__fixtures__/airlabs-routes-IAD-SLC.json';
 
-const env: Record<string, string | undefined> = {};
-vi.mock('$env/dynamic/private', () => ({ env }));
+const env = mockEnv();
+vi.mock('$app/env/private', () => env);
 
 const { GET } = await import('./+server');
 

@@ -6,7 +6,7 @@ import {
   computeSunSide,
   bestWaypointPerSighting,
 } from './flight-route';
-import type { EventWaypoint } from '$lib/types';
+import type { EventWaypoint } from '#lib/types.js';
 
 describe('bearing()', () => {
   it('returns ~0° for due north', () => {

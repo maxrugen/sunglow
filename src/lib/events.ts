@@ -1,4 +1,4 @@
-import type { SkyEvent } from '$lib/types';
+import type { SkyEvent } from '#lib/types.js';
 
 /** User-facing wording per event, so components don't hard-code "sunset". */
 export const EVENT_COPY: Record<

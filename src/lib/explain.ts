@@ -1,6 +1,6 @@
-import { EVENT_COPY } from '$lib/events';
-import { scoreLabel } from '$lib/score';
-import type { SkyEvent } from '$lib/types';
+import { EVENT_COPY } from '#lib/events.js';
+import { scoreLabel } from '#lib/score.js';
+import type { SkyEvent } from '#lib/types.js';
 
 /** Which scoring model produced the factors (see src/lib/server/scoring.ts). */
 export type ExplainModel = 'ground' | 'flight';

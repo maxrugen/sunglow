@@ -1,5 +1,5 @@
 import SunCalc from 'suncalc';
-import { fetchWithRetry, nearestIndex } from '$lib/server/weather';
+import { fetchWithRetry, nearestIndex } from '#lib/server/weather.js';
 
 const DEG_TO_RAD = Math.PI / 180;
 const RAD_TO_DEG = 180 / Math.PI;

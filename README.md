@@ -20,7 +20,7 @@ Sunset and sunrise quality prediction web app built with SvelteKit and TypeScrip
 - TypeScript across routes and components (Svelte 5 runes); shared types
 
 ### Tech stack
-- SvelteKit (Svelte 5) + Vite, deployed on Vercel
+- SvelteKit 3 (Svelte 5) + Vite 8, deployed on Vercel
 - TypeScript
 - SunCalc
 - Open‑Meteo (Weather + Geocoding) and BigDataCloud (reverse geocoding, called from the browser)
@@ -241,7 +241,7 @@ Response (shape abbreviated):
 - In‑memory caching by (lat, lon, event, event hour) with short TTL, checked before upstream calls; flight lookups cached for hours
 - Short timeouts; retries only for server errors and rate limits
 - Airport data and SunCalc stay on the server, keeping the client bundle small
-- Service worker (`src/service-worker.ts`) caches each build's assets and refreshes on deploy
+- Service worker (`src/service-worker/`) caches each build's assets and refreshes on deploy
 - Response includes `used` time/coords for transparency
 
 ---
@@ -272,7 +272,7 @@ src/
     score.ts                       # score labels + page theme
     http.ts                        # error message helper
     types.ts                       # client/shared types
-  service-worker.ts                # asset cache + push handlers
+  service-worker/index.ts          # asset cache + push handlers
   routes/
     +page.svelte                   # main UI (location + flight modes)
     +page.server.ts                # SSR prefetch (lat/lon/label via query)
@@ -290,7 +290,7 @@ src/
 ---
 
 ## Sunset & sunrise alerts (Web Push)
-Optional. Copy `.env.example` to `.env.local` and set `DATABASE_URL`, the VAPID keys and `CRON_SECRET`, then apply the migrations (see [Database migrations](#database-migrations)).
+Optional. New variables must also be declared in `src/env.ts`. Copy `.env.example` to `.env.local` and set `DATABASE_URL`, the VAPID keys and `CRON_SECRET`, then apply the migrations (see [Database migrations](#database-migrations)).
 
 - `/api/push/subscribe` stores the subscription with its location and events (`{ sunset, sunrise }`; the first subscribe uses the event currently shown). `/api/push/preferences` changes the events later without moving the location.
 - `/api/cron` (requires `Authorization: Bearer $CRON_SECRET`) sends, when score and confidence meet `SUNSET_SCORE_MIN` / `SUNSET_CONFIDENCE_MIN` (used for both events):

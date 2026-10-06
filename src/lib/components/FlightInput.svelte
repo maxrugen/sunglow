@@ -1,5 +1,5 @@
 <script lang="ts">
-    import type { Airport } from '$lib/types';
+    import type { Airport } from '#lib/types.js';
     import Combobox from './Combobox.svelte';
 
     type FlightSubmitDetail = { depIata: string; arrIata: string; depTime: string; arrTime: string };

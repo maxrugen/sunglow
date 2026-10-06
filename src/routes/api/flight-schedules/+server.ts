@@ -1,7 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { airlabsConfigured, fetchSchedules, operatesOn, weekdayOf, type RouteQuery } from '$lib/server/airlabs';
-import { airportByIata } from '$lib/server/airports';
+import { airlabsConfigured, fetchSchedules, operatesOn, weekdayOf, type RouteQuery } from '#lib/server/airlabs.js';
+import { airportByIata } from '#lib/server/airports.js';
 
 const FLIGHT = /^[A-Z0-9]{2}\d{1,4}[A-Z]?$/;
 const IATA = /^[A-Z]{3}$/;

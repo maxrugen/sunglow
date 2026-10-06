@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { mockEnv } from '#lib/server/test-env.js';
 
-const env: Record<string, string | undefined> = {};
-vi.mock('$env/dynamic/private', () => ({ env }));
+const env = mockEnv();
+vi.mock('$app/env/private', () => env);
 
 const inserted: unknown[] = [];
-vi.mock('$lib/server/db', () => ({
+vi.mock('#lib/server/db/index.js', () => ({
   db: {
     insert: () => ({
       values: (v: unknown) => ({
@@ -17,7 +18,7 @@ vi.mock('$lib/server/db', () => ({
 }));
 
 const { POST } = await import('./+server');
-const { createRatingToken } = await import('$lib/server/ratings');
+const { createRatingToken } = await import('#lib/server/ratings.js');
 
 const sunsetEpochSec = Math.floor(Date.now() / 1000) - 3600; // an hour ago
 const prediction = {

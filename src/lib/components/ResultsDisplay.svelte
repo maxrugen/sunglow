@@ -1,8 +1,8 @@
 <script lang="ts">
-    import { explainScore } from '$lib/explain';
-    import type { ClientPrediction } from '$lib/types';
-    import { scoreLabel } from '$lib/score';
-    import { EVENT_COPY } from '$lib/events';
+    import { explainScore } from '#lib/explain.js';
+    import type { ClientPrediction } from '#lib/types.js';
+    import { scoreLabel } from '#lib/score.js';
+    import { EVENT_COPY } from '#lib/events.js';
 
     interface Props {
         prediction: ClientPrediction | null;

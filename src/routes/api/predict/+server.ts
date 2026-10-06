@@ -1,8 +1,8 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { predictEvent, PredictionError } from '$lib/server/prediction';
-import { createRatingToken } from '$lib/server/ratings';
-import { parseLatLon } from '$lib/server/validate';
+import { predictEvent, PredictionError } from '#lib/server/prediction.js';
+import { createRatingToken } from '#lib/server/ratings.js';
+import { parseLatLon } from '#lib/server/validate.js';
 
 export const POST: RequestHandler = async ({ request }) => {
   let body: { latitude?: unknown; longitude?: unknown; event?: unknown };
