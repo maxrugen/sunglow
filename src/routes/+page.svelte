@@ -231,7 +231,7 @@
                 </button>
             {/each}
         </div>
-        <RatingPrompt />
+        <RatingPrompt request={data.ratingRequest} />
         <!-- The search stays mounted (just hidden) so "New search" returns to what was typed. -->
         <div class="panel" hidden={isLoading || !!predictionData}>
             <LocationInput {onLocationSuccess} />

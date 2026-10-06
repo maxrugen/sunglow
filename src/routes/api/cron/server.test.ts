@@ -7,7 +7,8 @@ vi.mock('#lib/server/db/index.js', () => ({
   db: { select: () => ({ from: async () => [{ id: 1, endpoint: 'https://fcm.googleapis.com/x' }] }) },
 }));
 const runAlerts = vi.fn();
-vi.mock('#lib/server/alerts.js', () => ({ runAlerts }));
+const runFollowUp = vi.fn();
+vi.mock('#lib/server/alerts.js', () => ({ runAlerts, runFollowUp, FOLLOW_UP_DELAY_MS: 30 * 60 * 1000 }));
 
 const { GET } = await import('./+server');
 
@@ -19,6 +20,8 @@ function call(auth = 'Bearer secret') {
 
 beforeEach(() => {
   runAlerts.mockReset();
+  runFollowUp.mockReset();
+  runFollowUp.mockResolvedValue(null);
   vi.spyOn(console, 'error').mockImplementation(() => {});
 });
 
@@ -32,6 +35,26 @@ describe('GET /api/cron', () => {
     const res = await call();
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ checked: 1, sent: 1, failed: 0 });
+  });
+
+  it('sends due rating follow-ups before alerts and counts them', async () => {
+    runFollowUp.mockResolvedValue('sent');
+    runAlerts.mockResolvedValue([]);
+    const res = await call();
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ followUps: { sent: 1 }, failed: 0 });
+    expect(runFollowUp.mock.invocationCallOrder[0]).toBeLessThan(runAlerts.mock.invocationCallOrder[0]);
+  });
+
+  it('reports a failed follow-up send, and skips alerts for a pruned subscription', async () => {
+    runFollowUp.mockResolvedValueOnce('send-failed');
+    runAlerts.mockResolvedValue([]);
+    expect((await call()).status).toBe(500);
+
+    runFollowUp.mockResolvedValueOnce('pruned');
+    runAlerts.mockClear();
+    expect((await call()).status).toBe(200);
+    expect(runAlerts).not.toHaveBeenCalled();
   });
 
   it('returns 500 so the scheduler reports it when an alert failed', async () => {

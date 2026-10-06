@@ -1,6 +1,16 @@
 import { describe, it, expect, vi } from 'vitest';
 import SunCalc from 'suncalc';
-import { alertsDue, alertMessage, parseAlertEvents, runAlerts, type AlertConfig, type AlertSubscription } from './alerts';
+import {
+  alertsDue,
+  alertMessage,
+  followUpMessage,
+  parseAlertEvents,
+  runAlerts,
+  runFollowUp,
+  type AlertConfig,
+  type AlertSubscription,
+} from './alerts';
+import type { RatingSnapshot } from './ratings';
 import type { PredictionPayload } from './prediction';
 
 const HOUR = 3600 * 1000;
@@ -17,6 +27,8 @@ function sub(overrides: Partial<AlertSubscription> = {}): AlertSubscription {
     lastNotifiedDate: null,
     lastSunriseEveningDate: null,
     lastSunriseMorningDate: null,
+    ratingToken: null,
+    ratingFollowupAt: null,
     ...overrides,
   };
 }
@@ -139,6 +151,30 @@ describe('runAlerts()', () => {
     expect((await runAlerts(s, now, config, 'https://x', deps))[0].outcome).toBe('sent');
   });
 
+  it('schedules the rating follow-up only for alerts that were sent', async () => {
+    const scheduleFollowUp = vi.fn(async () => {});
+    await runAlerts(sub({ alertSunset: false }), now, config, 'https://x', { ...fakeDeps(), scheduleFollowUp });
+    expect(scheduleFollowUp).toHaveBeenCalledTimes(1);
+    expect((scheduleFollowUp.mock.calls[0] as unknown[])[1]).toMatchObject({ kind: 'sunrise-morning', eventTime: sunrise });
+
+    scheduleFollowUp.mockClear();
+    const quiet = fakeDeps({ qualityScore: 60, confidence: 90 } as PredictionPayload);
+    await runAlerts(sub({ alertSunset: false }), now, config, 'https://x', { ...quiet, scheduleFollowUp });
+    const failing = fakeDeps();
+    failing.send.mockResolvedValueOnce('failed' as never);
+    await runAlerts(sub({ alertSunset: false }), now, config, 'https://x', { ...failing, scheduleFollowUp });
+    expect(scheduleFollowUp).not.toHaveBeenCalled();
+  });
+
+  it('still counts the alert as sent if scheduling the follow-up fails', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const scheduleFollowUp = vi.fn(async () => {
+      throw new Error('db down');
+    });
+    const results = await runAlerts(sub({ alertSunset: false }), now, config, 'https://x', { ...fakeDeps(), scheduleFollowUp });
+    expect(results).toEqual([{ kind: 'sunrise-morning', outcome: 'sent' }]);
+  });
+
   it("doesn't claim when the prediction fails", async () => {
     const deps = fakeDeps();
     deps.predict.mockRejectedValueOnce(new Error('upstream'));
@@ -154,5 +190,73 @@ describe('parseAlertEvents()', () => {
     expect(parseAlertEvents({ sunset: false, sunrise: false })).toBeNull();
     expect(parseAlertEvents({ sunset: 'yes', sunrise: true })).toBeNull();
     expect(parseAlertEvents('sunrise')).toBeNull();
+  });
+});
+
+describe('rating follow-up', () => {
+  const sunset = new Date('2026-10-16T16:15:00Z');
+  const snapshot = { event: 'sunset', eventEpochSec: sunset.getTime() / 1000, predictedScore: 86 } as RatingSnapshot;
+  const pending = (overrides: Partial<AlertSubscription> = {}) =>
+    sub({ ratingToken: 'tok.sig', ratingFollowupAt: new Date(sunset.getTime() + 30 * 60 * 1000), ...overrides });
+
+  function fakeDeps(read: RatingSnapshot | null = snapshot) {
+    let taken = false;
+    return {
+      claim: vi.fn(async () => (taken ? false : (taken = true))),
+      release: vi.fn(async () => {
+        taken = false;
+      }),
+      readToken: vi.fn(() => read),
+      send: vi.fn(async () => 'sent' as const),
+    };
+  }
+
+  it('asks how it was, linking to the rating prompt, and replaces the alert', () => {
+    const message = followUpMessage(sub(), snapshot, 'tok.sig', 'https://sunglow.app');
+    expect(message).toEqual({
+      title: 'How was the sunset? 🌇',
+      body: 'Berlin: we predicted 86/100. Tap to rate it.',
+      url: 'https://sunglow.app/?rate=tok.sig&label=Berlin',
+      tag: 'sunglow-sunset',
+    });
+    expect(followUpMessage(sub(), { ...snapshot, event: 'sunrise' }, 't', 'https://x').tag).toBe('sunglow-sunrise');
+  });
+
+  it('waits until it is due', async () => {
+    const deps = fakeDeps();
+    expect(await runFollowUp(pending(), new Date(sunset.getTime() + 10 * 60 * 1000), 'https://x', deps)).toBeNull();
+    expect(await runFollowUp(sub(), new Date(sunset.getTime() + 2 * HOUR), 'https://x', deps)).toBeNull();
+    expect(deps.claim).not.toHaveBeenCalled();
+  });
+
+  it('sends once when due, even with overlapping runs', async () => {
+    const deps = fakeDeps();
+    const later = new Date(sunset.getTime() + 45 * 60 * 1000);
+    const results = await Promise.all([runFollowUp(pending(), later, 'https://x', deps), runFollowUp(pending(), later, 'https://x', deps)]);
+    expect(results.sort()).toEqual(['already-claimed', 'sent']);
+    expect(deps.send).toHaveBeenCalledTimes(1);
+  });
+
+  it('never outlives the 24-hour rating window', async () => {
+    const deps = fakeDeps();
+    await runFollowUp(pending(), new Date(sunset.getTime() + 20 * HOUR), 'https://x', deps);
+    const options = (deps.send.mock.calls[0] as unknown[])[2] as { ttlSeconds: number };
+    expect(options.ttlSeconds).toBe(4 * 3600);
+  });
+
+  it('drops follow-ups whose token is invalid or too old to rate', async () => {
+    const deps = fakeDeps(null);
+    expect(await runFollowUp(pending(), new Date(sunset.getTime() + 30 * HOUR), 'https://x', deps)).toBe('expired');
+    expect(deps.claim).toHaveBeenCalledTimes(1);
+    expect(deps.send).not.toHaveBeenCalled();
+  });
+
+  it('releases a failed send for the next run', async () => {
+    const deps = fakeDeps();
+    deps.send.mockResolvedValueOnce('failed' as never);
+    const later = new Date(sunset.getTime() + HOUR);
+    expect(await runFollowUp(pending(), later, 'https://x', deps)).toBe('send-failed');
+    expect(deps.release).toHaveBeenCalledTimes(1);
+    expect(await runFollowUp(pending(), later, 'https://x', deps)).toBe('sent');
   });
 });

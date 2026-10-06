@@ -53,6 +53,7 @@ Sunglow is a SvelteKit 3 app (Svelte 5, runes, Vite 8) that predicts sunset and 
 
 - `/api/predict` and the deep-link load attach a `ratingToken` (`src/lib/server/ratings.ts`): an HMAC-signed snapshot of the prediction (event, inputs, score, confidence, `SCORING_VERSION`). Requires `RATING_SECRET` + `DATABASE_URL`, otherwise ratings are off.
 - `RatingPrompt.svelte` + `src/lib/rating-store.ts` (localStorage) ask for a 1–5 rating from 15 min before until 24 h after a viewed sunrise/sunset; `POST /api/ratings` verifies the token and upserts into `sunset_ratings` (despite the name, it holds both events: see `event`; `sunset_at` is the event time).
+- Follow-up: when an alert is sent, `scheduleFollowUp` stores the prediction's rating token and `rating_followup_at` (event + 30 min) on the subscription. Each cron run first calls `runFollowUp()` (`alerts.ts`): it claims the exact pending follow-up, sends "How was the sunset?" (same tag as the alert, so it replaces it) linking to `/?rate=<token>&label=…`, and releases it on a failed send. `+page.server.ts` turns the link into `ratingRequest` (`ratingRequestFrom()`), which `RatingPrompt` shows at once, keeps in the pending store and strips from the URL.
 - Token and stored-item readers accept the pre-sunrise format (no `event`, `sunsetEpochSec`) for backwards compatibility.
 
 ### Database migrations

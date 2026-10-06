@@ -42,19 +42,23 @@ function write(items: PendingRating[]) {
 const sameEvent = (a: PendingRating, b: PendingRating) =>
   a.event === b.event && a.eventEpochSec === b.eventEpochSec && a.label === b.label;
 
+/** Keep a rating request until it is answered, dismissed or its window closes. */
+export function rememberPending(item: PendingRating) {
+  // Latest view of the same event wins; keep the newest few.
+  write([...read().filter((p) => !sameEvent(p, item)), item].slice(-MAX_PENDING));
+}
+
 /** Remember a prediction so we can ask how it turned out after the sunrise or sunset. */
 export function rememberForRating(prediction: ClientPrediction, label: string) {
   const time = prediction.timings.event;
   if (!prediction.ratingToken || !time) return;
-  const item: PendingRating = {
+  rememberPending({
     token: prediction.ratingToken,
     label: label || 'your location',
     event: prediction.event,
     eventEpochSec: Math.floor(time.getTime() / 1000),
     predictedScore: prediction.qualityScore,
-  };
-  // Latest view of the same event wins; keep the newest few.
-  write([...read().filter((p) => !sameEvent(p, item)), item].slice(-MAX_PENDING));
+  });
 }
 
 /** Oldest sunrise/sunset that can be rated now. Drops entries whose window has closed. */

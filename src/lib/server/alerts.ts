@@ -2,6 +2,8 @@ import { nextEvent, type PredictionPayload } from '#lib/server/prediction.js';
 import { timeZoneAt } from '#lib/server/flight-time.js';
 import type { PushPayload, SendOptions } from '#lib/server/webpush.js';
 import type { PushSubscriptionRow } from '#lib/server/db/schema.js';
+import type { RatingSnapshot } from '#lib/server/ratings.js';
+import { EVENT_COPY } from '#lib/events.js';
 import type { SkyEvent } from '#lib/types.js';
 
 const HOUR_MS = 3600 * 1000;
@@ -42,6 +44,8 @@ export type AlertSubscription = Pick<
   | 'lastNotifiedDate'
   | 'lastSunriseEveningDate'
   | 'lastSunriseMorningDate'
+  | 'ratingToken'
+  | 'ratingFollowupAt'
 >;
 
 function localDateKey(d: Date, timeZone: string): string {
@@ -121,6 +125,8 @@ export type AlertDeps<S extends AlertSubscription> = {
   /** Undo a claim after a failed send so the next run retries. */
   release: (sub: S, due: AlertDue) => Promise<void>;
   send: (sub: S, message: PushPayload, options: SendOptions) => Promise<'sent' | 'pruned' | 'failed' | 'skipped'>;
+  /** Remember a sent alert's prediction for the "How was it?" follow-up after the event. */
+  scheduleFollowUp?: (sub: S, due: AlertDue, payload: PredictionPayload) => Promise<void>;
 };
 
 export type AlertOutcome = 'sent' | 'below-threshold' | 'already-claimed' | 'predict-failed' | 'send-failed' | 'pruned';
@@ -160,6 +166,12 @@ export async function runAlerts<S extends AlertSubscription>(
     const result = await deps.send(sub, alertMessage(due, sub, payload, appUrl), { ttlSeconds });
     if (result === 'sent') {
       results.push({ kind: due.kind, outcome: 'sent' });
+      try {
+        await deps.scheduleFollowUp?.(sub, due, payload);
+      } catch (err) {
+        // The alert went out; a missing follow-up only costs a rating.
+        console.error('[alerts] could not schedule the rating follow-up', err);
+      }
     } else if (result === 'pruned') {
       results.push({ kind: due.kind, outcome: 'pruned' });
       break; // the subscription is gone
@@ -169,6 +181,60 @@ export async function runAlerts<S extends AlertSubscription>(
     }
   }
   return results;
+}
+
+/** The follow-up goes out on the first cron run this long after the event (afterglow included). */
+export const FOLLOW_UP_DELAY_MS = 30 * 60 * 1000;
+/** Undelivered follow-ups are dropped after this long; rating stays possible for 24 h. */
+const FOLLOW_UP_TTL_MS = 12 * HOUR_MS;
+/** Same as ratings.ts (not imported: alerts.ts stays free of env access). */
+const RATING_WINDOW_MS = 24 * HOUR_MS;
+
+/** "How was the sunset?" notification, linking to the rating prompt for that prediction. */
+export function followUpMessage(sub: AlertSubscription, snapshot: RatingSnapshot, token: string, appUrl: string): PushPayload {
+  const label = sub.label || 'your location';
+  const { noun, icon } = EVENT_COPY[snapshot.event];
+  return {
+    title: `How was the ${noun}? ${icon}`,
+    body: `${label}: we predicted ${snapshot.predictedScore}/100. Tap to rate it.`,
+    url: `${appUrl}/?rate=${encodeURIComponent(token)}&label=${encodeURIComponent(label)}`,
+    // Same tag as the alert, so the follow-up replaces it.
+    tag: `sunglow-${snapshot.event}`,
+  };
+}
+
+export type FollowUpDeps<S extends AlertSubscription> = {
+  /** Atomically take the pending follow-up; false if another run already did. */
+  claim: (sub: S) => Promise<boolean>;
+  /** Put it back after a failed send so the next run retries. */
+  release: (sub: S) => Promise<void>;
+  /** The token's snapshot, or null if it is invalid or can no longer be rated. */
+  readToken: (token: string) => RatingSnapshot | null;
+  send: AlertDeps<S>['send'];
+};
+
+export type FollowUpOutcome = 'sent' | 'expired' | 'already-claimed' | 'send-failed' | 'pruned';
+
+/** Send a subscriber's pending "How was it?" follow-up once it's due. Null if nothing is due. */
+export async function runFollowUp<S extends AlertSubscription>(
+  sub: S,
+  now: Date,
+  appUrl: string,
+  deps: FollowUpDeps<S>
+): Promise<FollowUpOutcome | null> {
+  if (!sub.ratingToken || !sub.ratingFollowupAt || sub.ratingFollowupAt.getTime() > now.getTime()) return null;
+  if (!(await deps.claim(sub))) return 'already-claimed';
+  const snapshot = deps.readToken(sub.ratingToken);
+  if (!snapshot) return 'expired';
+  // Never deliver it after the rating window (24 h after the event) has closed.
+  const windowLeftMs = snapshot.eventEpochSec * 1000 + RATING_WINDOW_MS - now.getTime();
+  const result = await deps.send(sub, followUpMessage(sub, snapshot, sub.ratingToken, appUrl), {
+    ttlSeconds: Math.min(FOLLOW_UP_TTL_MS, windowLeftMs) / 1000,
+  });
+  if (result === 'sent') return 'sent';
+  if (result === 'pruned') return 'pruned';
+  await deps.release(sub);
+  return 'send-failed';
 }
 
 /**

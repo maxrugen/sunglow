@@ -7,7 +7,18 @@ import { db } from '#lib/server/db/index.js';
 import { pushSubscriptions, type PushSubscriptionRow } from '#lib/server/db/schema.js';
 import { sendPush } from '#lib/server/webpush.js';
 import { predictEvent } from '#lib/server/prediction.js';
-import { runAlerts, type AlertConfig, type AlertDeps, type AlertKind, type AlertOutcome } from '#lib/server/alerts.js';
+import {
+  FOLLOW_UP_DELAY_MS,
+  runAlerts,
+  runFollowUp,
+  type AlertConfig,
+  type AlertDeps,
+  type AlertKind,
+  type AlertOutcome,
+  type FollowUpDeps,
+  type FollowUpOutcome,
+} from '#lib/server/alerts.js';
+import { createRatingToken, inRatingWindow, verifyRatingToken } from '#lib/server/ratings.js';
 
 export const config = { maxDuration: 60 };
 
@@ -47,6 +58,40 @@ const deps: AlertDeps<PushSubscriptionRow> = {
       .where(and(eq(pushSubscriptions.endpoint, sub.endpoint), eq(pushSubscriptions[due.column], due.dayKey)));
   },
   send: (sub, message, options) => sendPush(sub, message, options),
+  async scheduleFollowUp(sub, due, payload) {
+    const token = createRatingToken(payload);
+    if (!token) return; // ratings are off
+    await db
+      .update(pushSubscriptions)
+      .set({ ratingToken: token, ratingFollowupAt: new Date(due.eventTime.getTime() + FOLLOW_UP_DELAY_MS) })
+      .where(eq(pushSubscriptions.endpoint, sub.endpoint));
+  },
+};
+
+const followUpDeps: FollowUpDeps<PushSubscriptionRow> = {
+  async claim(sub) {
+    const claimed = await db
+      .update(pushSubscriptions)
+      .set({ ratingToken: null, ratingFollowupAt: null })
+      .where(
+        // The exact follow-up this run read: not one scheduled since, and not one another run took.
+        and(eq(pushSubscriptions.endpoint, sub.endpoint), eq(pushSubscriptions.ratingFollowupAt, sub.ratingFollowupAt!))
+      )
+      .returning({ id: pushSubscriptions.id });
+    return claimed.length > 0;
+  },
+  async release(sub) {
+    // Only if nothing newer was scheduled meanwhile.
+    await db
+      .update(pushSubscriptions)
+      .set({ ratingToken: sub.ratingToken, ratingFollowupAt: sub.ratingFollowupAt })
+      .where(and(eq(pushSubscriptions.endpoint, sub.endpoint), sql`${pushSubscriptions.ratingFollowupAt} is null`));
+  },
+  readToken(token) {
+    const snapshot = verifyRatingToken(token);
+    return snapshot && inRatingWindow(snapshot.eventEpochSec) ? snapshot : null;
+  },
+  send: (sub, message, options) => sendPush(sub, message, options),
 };
 
 async function handle(request: Request, url: URL) {
@@ -70,6 +115,7 @@ async function handle(request: Request, url: URL) {
     'sunrise-evening': {},
     'sunrise-morning': {},
   };
+  const followUps: Partial<Record<FollowUpOutcome, number>> = {};
   let failed = 0;
 
   // A fixed pool of workers drains the shared queue.
@@ -78,6 +124,10 @@ async function handle(request: Request, url: URL) {
     Array.from({ length: Math.min(CONCURRENCY, queue.length) }, async () => {
       for (let sub = queue.shift(); sub; sub = queue.shift()) {
         try {
+          // Follow-ups first: an alert for the next event would replace the pending one.
+          const followUp = await runFollowUp(sub, now, appUrl, followUpDeps);
+          if (followUp) followUps[followUp] = (followUps[followUp] ?? 0) + 1;
+          if (followUp === 'pruned') continue;
           for (const { kind, outcome } of await runAlerts(sub, now, alertConfig, appUrl, deps)) {
             outcomes[kind][outcome] = (outcomes[kind][outcome] ?? 0) + 1;
           }
@@ -96,8 +146,9 @@ async function handle(request: Request, url: URL) {
     checked: subs.length,
     sent: total('sent'),
     pruned: total('pruned'),
-    failed: failed + total('predict-failed') + total('send-failed'),
+    failed: failed + total('predict-failed') + total('send-failed') + (followUps['send-failed'] ?? 0),
     byKind: outcomes,
+    followUps,
   };
   // A non-2xx status makes the scheduler (cron-job.org) report the failed run.
   return json(summary, { status: summary.failed > 0 ? 500 : 200 });

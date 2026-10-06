@@ -2,6 +2,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import * as env from '$app/env/private';
 import { SCORING_VERSION, type WeatherData } from '#lib/server/scoring.js';
 import type { SkyEvent } from '#lib/types.js';
+import type { PendingRating } from '#lib/rating-store.js';
 
 /** Ratings are accepted from the event until this long after it. */
 export const RATING_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -75,6 +76,22 @@ export function verifyRatingToken(token: string): RatingSnapshot | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * A rating request from a follow-up notification link (`/?rate=<token>`), or
+ * null if the token is invalid or its sunrise/sunset can no longer be rated.
+ */
+export function ratingRequestFrom(token: string, label: string, nowMs = Date.now()): PendingRating | null {
+  const snapshot = verifyRatingToken(token);
+  if (!snapshot || !inRatingWindow(snapshot.eventEpochSec, nowMs)) return null;
+  return {
+    token,
+    label: label || 'your location',
+    event: snapshot.event,
+    eventEpochSec: snapshot.eventEpochSec,
+    predictedScore: snapshot.predictedScore,
+  };
 }
 
 /** Whether `nowMs` falls in the window in which a sunrise or sunset can be rated. */
