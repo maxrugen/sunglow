@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import SunCalc from 'suncalc';
-import { predictSunset } from './prediction';
+import { predictSunset, upcomingSunset } from './prediction';
 
 // New York, 2026-06-10: local midnight is 04:00Z, sunset ≈ 00:30Z on the 11th.
 const NYC = { latitude: 40.71, longitude: -74.0 };
 const START_SEC = Date.UTC(2026, 5, 10, 4) / 1000;
-const HOURS = Array.from({ length: 24 }, (_, i) => START_SEC + i * 3600);
+// Two days, matching forecast_days=2.
+const HOURS = Array.from({ length: 48 }, (_, i) => START_SEC + i * 3600);
 
 function forecastResponse() {
   const fill = (v: number) => HOURS.map(() => v);
@@ -79,5 +80,31 @@ describe('predictSunset()', () => {
     const callsAfterFirst = fetchMock.mock.calls.length;
     await predictSunset(coords);
     expect(fetchMock.mock.calls.length).toBe(callsAfterFirst);
+  });
+
+  it('scores tomorrow once tonight\'s afterglow has passed', async () => {
+    // 02:00Z on the 11th is 22:00 EDT on the 10th, ~1.5 h after sunset.
+    vi.setSystemTime(new Date('2026-06-11T02:00:00Z'));
+    const coords = { latitude: 40.74, longitude: -74.0 };
+    const payload = await predictSunset(coords);
+    const tomorrow = SunCalc.getTimes(new Date('2026-06-11T16:00:00Z'), coords.latitude, coords.longitude).sunset;
+
+    expect(payload.day).toBe('tomorrow');
+    expect(payload.timings.sunsetEpochSec).toBe(Math.floor(tomorrow.getTime() / 1000));
+    expect(Math.abs(payload.used.epochSec - tomorrow.getTime() / 1000)).toBeLessThanOrEqual(1800);
+  });
+});
+
+describe('upcomingSunset()', () => {
+  it('keeps tonight during the afterglow', () => {
+    const sunset = SunCalc.getTimes(new Date('2026-06-10T16:00:00Z'), NYC.latitude, NYC.longitude).sunset;
+    const now = new Date(sunset.getTime() + 20 * 60 * 1000);
+    expect(upcomingSunset(now, NYC.latitude, NYC.longitude).day).toBe('today');
+  });
+
+  it('has no sunset during polar day', () => {
+    const r = upcomingSunset(new Date('2026-06-21T12:00:00Z'), 78.2, 15.6); // Svalbard
+    expect(r.sunset).toBeNull();
+    expect(r.day).toBe('today');
   });
 });

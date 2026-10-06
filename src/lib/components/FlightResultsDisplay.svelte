@@ -1,13 +1,16 @@
 <script lang="ts">
-    import { createEventDispatcher } from 'svelte';
     import type { FlightPredictionResponse } from '$lib/types';
+    import { scoreLabel } from '$lib/score';
 
-    export let prediction: FlightPredictionResponse | null = null;
+    interface Props {
+        prediction?: FlightPredictionResponse | null;
+        onBack: () => void;
+    }
 
-    const dispatch = createEventDispatcher<{ back: void }>();
+    let { prediction = null, onBack }: Props = $props();
 
-    $: score = Number(prediction?.qualityScore ?? 0);
-    $: description = score >= 80 ? 'Great' : score >= 65 ? 'Good' : score >= 40 ? 'Fair' : 'Poor';
+    let score = $derived(Number(prediction?.qualityScore ?? 0));
+    let description = $derived(scoreLabel(score));
 
     function formatUTCTime(isoStr: string | undefined) {
         if (!isoStr) return '--';
@@ -140,7 +143,7 @@
         <p class="message">{prediction.message || 'The sun does not set during this flight.'}</p>
     {/if}
 
-    <button class="btn back-btn" on:click={() => dispatch('back')}>
+    <button class="btn back-btn" onclick={onBack}>
         ← New prediction
     </button>
 </section>

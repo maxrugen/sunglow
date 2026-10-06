@@ -2,21 +2,36 @@ import type { WeatherData } from './server/scoring';
 
 export type { WeatherData };
 
-export type PredictionResponse = {
+/** Fields of the server prediction payload that the UI needs. */
+export type PredictionSummary = {
   qualityScore: number;
   confidence?: number;
   explanation?: { factors?: Record<string, unknown> };
-  weatherData?: Partial<WeatherData>;
-  used?: { epochSec?: number; latitude?: number; longitude?: number };
+  day?: 'today' | 'tomorrow';
+  timings?: { sunsetEpochSec: number | null; goldenHourEpochSec: number | null };
+  used?: { epochSec?: number; latitude?: number; longitude?: number; utcOffsetSeconds?: number };
 };
 
 export type ClientPrediction = {
   qualityScore: number;
   confidence?: number;
   explanation?: { factors?: Record<string, unknown> };
+  day: 'today' | 'tomorrow';
   timings: { sunset: Date | null; goldenHour: Date | null };
-  used?: { epochSec?: number; latitude?: number; longitude?: number };
+  used?: { epochSec?: number; latitude?: number; longitude?: number; utcOffsetSeconds?: number };
 };
+
+export function toClientPrediction(p: PredictionSummary): ClientPrediction {
+  const toDate = (sec: number | null | undefined) => (sec != null ? new Date(sec * 1000) : null);
+  return {
+    qualityScore: p.qualityScore ?? 0,
+    confidence: p.confidence,
+    explanation: p.explanation,
+    day: p.day ?? 'today',
+    timings: { sunset: toDate(p.timings?.sunsetEpochSec), goldenHour: toDate(p.timings?.goldenHourEpochSec) },
+    used: p.used,
+  };
+}
 
 // Flight sunset prediction types
 

@@ -35,7 +35,6 @@
   },
   "devDependencies": {
     "@opentelemetry/api": "^1.9.0",
-    "@sveltejs/adapter-auto": "^3.3.1",
     "@sveltejs/kit": "^2.57.1",
     "@types/node": "^24.9.1",
     "@types/web-push": "^3.6.4",

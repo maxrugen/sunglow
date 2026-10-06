@@ -1,4 +1,3 @@
-import SunCalc from 'suncalc';
 import { env } from '$env/dynamic/private';
 import type { PageServerLoad } from './$types';
 import { predictSunset } from '$lib/server/prediction';
@@ -22,7 +21,6 @@ export const load: PageServerLoad = async ({ url }) => {
 
   try {
     const payload = await predictSunset({ latitude, longitude });
-    const times = SunCalc.getTimes(new Date(), latitude, longitude);
     return {
       flightLookupAvailable,
       ssr: {
@@ -31,9 +29,10 @@ export const load: PageServerLoad = async ({ url }) => {
         label,
         qualityScore: payload.qualityScore,
         confidence: payload.confidence,
-        explanation: payload.explanation as { factors?: Record<string, unknown> },
+        explanation: payload.explanation,
+        day: payload.day,
+        timings: payload.timings,
         used: payload.used,
-        timings: { sunset: times.sunset ?? null, goldenHour: times.goldenHour ?? null },
       },
     };
   } catch {

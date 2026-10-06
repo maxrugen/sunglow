@@ -13,6 +13,10 @@ export type PredictionPayload = {
   };
   confidence: number;
   explanation: { factors: Record<string, unknown> };
+  /** Which sunset was scored: tonight's, or tomorrow's once tonight's is over. */
+  day: 'today' | 'tomorrow';
+  /** UTC epoch seconds; null where the sun doesn't set (polar day/night). */
+  timings: { sunsetEpochSec: number | null; goldenHourEpochSec: number | null };
   used: {
     /** UTC epoch seconds of the scored hour. */
     epochSec: number;
@@ -45,6 +49,29 @@ function cacheSet(key: string, payload: PredictionPayload) {
   responseCache.set(key, { ts: Date.now(), payload });
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+/** Color often peaks after the sun is down, so keep showing tonight for a while. */
+const AFTERGLOW_MS = 30 * 60 * 1000;
+
+function validDate(d: unknown): Date | null {
+  return d instanceof Date && !isNaN(d.getTime()) ? d : null;
+}
+
+/** Tonight's sunset, or tomorrow's once tonight's afterglow has passed. */
+export function upcomingSunset(now: Date, latitude: number, longitude: number) {
+  const today = SunCalc.getTimes(now, latitude, longitude);
+  const sunsetToday = validDate(today?.sunset);
+  if (sunsetToday && now.getTime() > sunsetToday.getTime() + AFTERGLOW_MS) {
+    const tomorrow = SunCalc.getTimes(new Date(now.getTime() + DAY_MS), latitude, longitude);
+    return {
+      day: 'tomorrow' as const,
+      sunset: validDate(tomorrow?.sunset),
+      goldenHour: validDate(tomorrow?.goldenHour),
+    };
+  }
+  return { day: 'today' as const, sunset: sunsetToday, goldenHour: validDate(today?.goldenHour) };
+}
+
 /** Carries an HTTP status so the route can translate upstream failures. */
 export class PredictionError extends Error {
   status: number;
@@ -67,13 +94,8 @@ export async function predictSunset({
   latitude: number;
   longitude: number;
 }): Promise<PredictionPayload> {
-  let sunsetSec: number | null = null;
-  try {
-    const sunset: Date | undefined = SunCalc.getTimes(new Date(), latitude, longitude)?.sunset;
-    if (sunset instanceof Date && !isNaN(sunset.getTime())) {
-      sunsetSec = Math.floor(sunset.getTime() / 1000);
-    }
-  } catch {}
+  const upcoming = upcomingSunset(new Date(), latitude, longitude);
+  const sunsetSec = upcoming.sunset ? Math.floor(upcoming.sunset.getTime() / 1000) : null;
 
   const cacheKey = getCacheKey(latitude, longitude, sunsetSec);
   const cached = responseCache.get(cacheKey);
@@ -82,7 +104,8 @@ export async function predictSunset({
   }
 
   const [forecast, aq] = await Promise.all([
-    fetchForecast(latitude, longitude, 1, { daily: 'sunset' }),
+    // Two days so tomorrow's sunset is covered once tonight's has passed.
+    fetchForecast(latitude, longitude, 2, { daily: 'sunset' }),
     fetchAirQuality(latitude, longitude),
   ]);
   if (!forecast) {
@@ -95,7 +118,7 @@ export async function predictSunset({
 
   // Fall back to Open-Meteo's own sunset (also a UTC epoch) if SunCalc had none.
   let targetSec = sunsetSec;
-  const apiSunset = Number(forecast.daily?.sunset?.[0]);
+  const apiSunset = Number(forecast.daily?.sunset?.[upcoming.day === 'tomorrow' ? 1 : 0]);
   if (targetSec == null && Number.isFinite(apiSunset)) targetSec = apiSunset;
 
   let idx = 0;
@@ -152,6 +175,11 @@ export async function predictSunset({
     weatherData,
     confidence,
     explanation: { factors: details },
+    day: upcoming.day,
+    timings: {
+      sunsetEpochSec: sunsetSec,
+      goldenHourEpochSec: upcoming.goldenHour ? Math.floor(upcoming.goldenHour.getTime() / 1000) : null,
+    },
     used: { epochSec: selectedEpochSec, latitude, longitude, utcOffsetSeconds },
   };
 

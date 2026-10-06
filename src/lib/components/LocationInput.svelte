@@ -1,20 +1,31 @@
 <script lang="ts">
-    import { createEventDispatcher } from 'svelte';
+    type GeocodeResult = { latitude: number; longitude: number; name: string; admin1?: string; country: string };
 
-    type LocationSuccessDetail = { latitude: number; longitude: number; label?: string };
-    type LocationErrorDetail = { message: string };
-    const dispatch = createEventDispatcher<{ locationSuccess: LocationSuccessDetail; locationError: LocationErrorDetail }>();
+    interface Props {
+        onLocationSuccess: (location: { latitude: number; longitude: number; label?: string }) => void;
+        onLocationError: (error: { message: string }) => void;
+    }
 
-    let city: string = '';
-    let results: any[] = [];
-    let isSearching: boolean = false;
-    let isLocating: boolean = false;
-    let errorMessage: string = '';
-    let activeIndex: number = -1;
-    let debounceHandle: any;
-    let rootEl: HTMLDivElement;
-    let inputEl: HTMLInputElement;
-    let activeAnnouncement: string = '';
+    let { onLocationSuccess, onLocationError }: Props = $props();
+
+    let city: string = $state('');
+    let results: GeocodeResult[] = $state([]);
+    let isSearching: boolean = $state(false);
+    let isLocating: boolean = $state(false);
+    let errorMessage: string = $state('');
+    let activeIndex: number = $state(-1);
+    let debounceHandle: ReturnType<typeof setTimeout>;
+    let rootEl: HTMLDivElement | undefined = $state();
+    let inputEl: HTMLInputElement | undefined = $state();
+
+    function select(r: GeocodeResult) {
+        onLocationSuccess({ latitude: r.latitude, longitude: r.longitude, label: `${r.name}${r.admin1 ? `, ${r.admin1}` : ''}, ${r.country}` });
+    }
+
+    function onSubmit(e: SubmitEvent) {
+        e.preventDefault();
+        searchCity();
+    }
 
     async function searchCity() {
         errorMessage = '';
@@ -58,8 +69,7 @@
             activeIndex = (activeIndex - 1 + results.length) % results.length;
         } else if (e.key === 'Enter' && activeIndex >= 0) {
             e.preventDefault();
-            const r = results[activeIndex];
-            dispatch('locationSuccess', { latitude: r.latitude, longitude: r.longitude, label: `${r.name}${r.admin1 ? `, ${r.admin1}` : ''}, ${r.country}` });
+            select(results[activeIndex]);
         } else if (e.key === 'Escape') {
             e.preventDefault();
             closeResults();
@@ -85,7 +95,7 @@
         errorMessage = '';
         if (!('geolocation' in navigator)) {
             errorMessage = 'Geolocation is not supported by your browser.';
-            dispatch('locationError', { message: errorMessage });
+            onLocationError({ message: errorMessage });
             return;
         }
 
@@ -94,29 +104,29 @@
             (pos) => {
                 isLocating = false;
                 const { latitude, longitude } = pos.coords;
-                dispatch('locationSuccess', { latitude, longitude });
+                onLocationSuccess({ latitude, longitude });
             },
             (err) => {
                 isLocating = false;
                 errorMessage = err?.message || 'Failed to retrieve your location.';
-                dispatch('locationError', { message: errorMessage });
+                onLocationError({ message: errorMessage });
             },
             { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
         );
     }
 </script>
 
-<svelte:window on:click={onWindowClick} />
+<svelte:window onclick={onWindowClick} />
 <div class="location-input" bind:this={rootEl}>
-    <form class="controls" on:submit|preventDefault={searchCity}>
+    <form class="controls" onsubmit={onSubmit}>
         <input
             type="text"
             placeholder="Enter a city"
             bind:value={city}
             aria-label="City name"
             aria-controls="search-results"
-            on:input={onInput}
-            on:keydown={onKeyDown}
+            oninput={onInput}
+            onkeydown={onKeyDown}
             bind:this={inputEl}
         />
         <button class="btn" type="submit" disabled={isLocating || isSearching}>
@@ -126,7 +136,7 @@
                 Search
             {/if}
         </button>
-        <button class="btn primary" on:click={useMyLocation} disabled={isLocating}>
+        <button class="btn primary" onclick={useMyLocation} disabled={isLocating}>
             {#if isLocating}
                 Locating...
             {:else}
@@ -141,17 +151,16 @@
 
     {#if results.length > 0}
         <p class="visually-hidden" aria-live="polite">{results.length} result{results.length === 1 ? '' : 's'} found</p>
-        <p class="visually-hidden" aria-live="polite">{activeAnnouncement}</p>
         <ul class="results" role="listbox" id="search-results">
-            {#each results as r}
+            {#each results as r, i}
                 <li>
                     <button
                         type="button"
                         class="result"
-                        class:active={activeIndex >= 0 && results[activeIndex] === r}
+                        class:active={i === activeIndex}
                         role="option"
-                        aria-selected={activeIndex >= 0 && results[activeIndex] === r ? 'true' : 'false'}
-                        on:click={() => dispatch('locationSuccess', { latitude: r.latitude, longitude: r.longitude, label: `${r.name}${r.admin1 ? `, ${r.admin1}` : ''}, ${r.country}` })}
+                        aria-selected={i === activeIndex}
+                        onclick={() => select(r)}
                     >
                         <span>{r.name}</span>
                         <small>{r.admin1 ? `${r.admin1}, ` : ''}{r.country}</small>
