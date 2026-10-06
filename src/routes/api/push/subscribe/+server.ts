@@ -5,8 +5,6 @@ import { pushSubscriptions } from '$lib/server/db/schema';
 import { isAllowedPushEndpoint } from '$lib/server/webpush';
 import { pushRequestAuthorized } from '$lib/server/push-auth';
 
-export const config = { runtime: 'nodejs20.x' };
-
 export const POST: RequestHandler = async ({ request }) => {
   if (!pushRequestAuthorized(request)) {
     return json({ error: 'unauthorized' }, { status: 401 });

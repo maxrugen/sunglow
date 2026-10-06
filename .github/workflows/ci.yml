@@ -11,9 +11,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # The Node version is set once in svelte.config.js; per-route pins override it and break deploys when Vercel retires a version.
+      - name: No per-route runtime pins
+        run: '! git grep -nE "runtime:[[:space:]]*''nodejs[0-9]+\.x''" -- src'
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version-file: package.json
           cache: npm
       - run: npm ci
       - run: npx svelte-kit sync

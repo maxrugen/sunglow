@@ -28,7 +28,7 @@ Sunset Quality Prediction web app built with SvelteKit and TypeScript. It estima
 ## Quick start
 
 ### Prerequisites
-- Node.js 18+ (or 20+ recommended)
+- Node.js 24+
 
 ### Install & run
 ```bash
