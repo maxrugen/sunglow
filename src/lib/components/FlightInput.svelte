@@ -1,5 +1,6 @@
 <script lang="ts">
     import type { Airport } from '$lib/types';
+    import Combobox from './Combobox.svelte';
 
     type FlightSubmitDetail = { depIata: string; arrIata: string; depTime: string; arrTime: string };
 
@@ -29,16 +30,13 @@
     let arrResults: Airport[] = $state([]);
     let selectedDep: Airport | null = null;
     let selectedArr: Airport | null = null;
-    let depActiveIndex: number = $state(-1);
-    let arrActiveIndex: number = $state(-1);
+    let dateStr: string = $state(localDateString());
     let depTime: string = $state('');
     let arrTime: string = $state('');
     let errorMessage: string = $state('');
-    let depRootEl: HTMLDivElement | undefined = $state();
-    let arrRootEl: HTMLDivElement | undefined = $state();
 
-    // Default date: today
-    let dateStr: string = $state(localDateString());
+    const airportLabel = (a: Airport) => `${a.iata} – ${a.name}`;
+    const resultsStatus = (n: number) => (n ? `${n} airport${n === 1 ? '' : 's'} found` : '');
 
     // Airport search runs on the server so the dataset stays out of the bundle.
     const searchCache = new Map<string, Airport[]>();
@@ -61,69 +59,35 @@
     let depDebounce: ReturnType<typeof setTimeout>;
     let arrDebounce: ReturnType<typeof setTimeout>;
 
-    function onDepInput() {
-        if (selectedDep && depSearch !== `${selectedDep.iata} – ${selectedDep.name}`) {
-            selectedDep = null;
-        }
+    function onDepInput(text: string) {
+        if (selectedDep && text !== airportLabel(selectedDep)) selectedDep = null;
         clearTimeout(depDebounce);
         depDebounce = setTimeout(async () => {
-            const query = depSearch;
-            const results = await searchAirport(query);
+            const results = await searchAirport(text);
             // Ignore responses for text the user has since changed.
-            if (query !== depSearch || selectedDep) return;
-            depResults = results;
-            depActiveIndex = results.length > 0 ? 0 : -1;
+            if (text === depSearch && !selectedDep) depResults = results;
         }, 150);
     }
 
-    function onArrInput() {
-        if (selectedArr && arrSearch !== `${selectedArr.iata} – ${selectedArr.name}`) {
-            selectedArr = null;
-        }
+    function onArrInput(text: string) {
+        if (selectedArr && text !== airportLabel(selectedArr)) selectedArr = null;
         clearTimeout(arrDebounce);
         arrDebounce = setTimeout(async () => {
-            const query = arrSearch;
-            const results = await searchAirport(query);
-            if (query !== arrSearch || selectedArr) return;
-            arrResults = results;
-            arrActiveIndex = results.length > 0 ? 0 : -1;
+            const results = await searchAirport(text);
+            if (text === arrSearch && !selectedArr) arrResults = results;
         }, 150);
     }
 
     function selectDep(a: Airport) {
         selectedDep = a;
-        depSearch = `${a.iata} – ${a.name}`;
+        depSearch = airportLabel(a);
         depResults = [];
-        depActiveIndex = -1;
     }
 
     function selectArr(a: Airport) {
         selectedArr = a;
-        arrSearch = `${a.iata} – ${a.name}`;
+        arrSearch = airportLabel(a);
         arrResults = [];
-        arrActiveIndex = -1;
-    }
-
-    function onDepKeyDown(e: KeyboardEvent) {
-        if (depResults.length === 0) return;
-        if (e.key === 'ArrowDown') { e.preventDefault(); depActiveIndex = (depActiveIndex + 1) % depResults.length; }
-        else if (e.key === 'ArrowUp') { e.preventDefault(); depActiveIndex = (depActiveIndex - 1 + depResults.length) % depResults.length; }
-        else if (e.key === 'Enter' && depActiveIndex >= 0) { e.preventDefault(); selectDep(depResults[depActiveIndex]); }
-        else if (e.key === 'Escape') { depResults = []; depActiveIndex = -1; }
-    }
-
-    function onArrKeyDown(e: KeyboardEvent) {
-        if (arrResults.length === 0) return;
-        if (e.key === 'ArrowDown') { e.preventDefault(); arrActiveIndex = (arrActiveIndex + 1) % arrResults.length; }
-        else if (e.key === 'ArrowUp') { e.preventDefault(); arrActiveIndex = (arrActiveIndex - 1 + arrResults.length) % arrResults.length; }
-        else if (e.key === 'Enter' && arrActiveIndex >= 0) { e.preventDefault(); selectArr(arrResults[arrActiveIndex]); }
-        else if (e.key === 'Escape') { arrResults = []; arrActiveIndex = -1; }
-    }
-
-    function onWindowClick(e: MouseEvent) {
-        const t = e.target as Node | null;
-        if (t && depRootEl && !depRootEl.contains(t)) { depResults = []; depActiveIndex = -1; }
-        if (t && arrRootEl && !arrRootEl.contains(t)) { arrResults = []; arrActiveIndex = -1; }
     }
 
     async function lookupFlight() {
@@ -157,7 +121,8 @@
         }
     }
 
-    function submit() {
+    function submit(e: SubmitEvent) {
+        e.preventDefault();
         errorMessage = '';
         if (!selectedDep) { errorMessage = 'Select a departure airport.'; return; }
         if (!selectedArr) { errorMessage = 'Select an arrival airport.'; return; }
@@ -173,74 +138,61 @@
             arrTime: `${dateStr}T${arrTime}:00`,
         });
     }
+
+    function onLookupSubmit(e: SubmitEvent) {
+        e.preventDefault();
+        lookupFlight();
+    }
 </script>
 
-<svelte:window onclick={onWindowClick} />
 <div class="flight-input">
     {#if lookupAvailable}
-        <div class="lookup-section">
+        <form class="lookup-section" onsubmit={onLookupSubmit}>
             <label class="field-label" for="flight-code-input">Flight number (optional)</label>
             <div class="lookup-row">
                 <input id="flight-code-input" type="text" placeholder="e.g. AA1004" bind:value={flightCode} maxlength="10" />
-                <input type="date" bind:value={flightDate} />
-                <button class="btn" onclick={lookupFlight} disabled={isLookingUp}>
+                <label class="visually-hidden" for="flight-lookup-date">Flight date</label>
+                <input id="flight-lookup-date" type="date" bind:value={flightDate} />
+                <button class="btn" type="submit" disabled={isLookingUp}>
                     {isLookingUp ? 'Looking up…' : 'Look up'}
                 </button>
             </div>
-        </div>
+        </form>
         <div class="divider"><span>or enter manually</span></div>
     {/if}
 
-    <div class="fields">
-        <div class="field" bind:this={depRootEl}>
-            <label class="field-label" for="dep-input">Departure airport</label>
-            <input
-                id="dep-input"
-                type="text"
-                placeholder="Search city or IATA code"
-                bind:value={depSearch}
-                oninput={onDepInput}
-                onkeydown={onDepKeyDown}
-                autocomplete="off"
-            />
-            {#if depResults.length > 0}
-                <ul class="results" role="listbox">
-                    {#each depResults as r, i}
-                        <li>
-                            <button type="button" class="result" class:active={i === depActiveIndex} role="option" aria-selected={i === depActiveIndex} onclick={() => selectDep(r)}>
-                                <span><strong>{r.iata}</strong> {r.name}</span>
-                                <small>{r.city}, {r.country}</small>
-                            </button>
-                        </li>
-                    {/each}
-                </ul>
-            {/if}
-        </div>
+    <form class="fields" onsubmit={submit}>
+        <Combobox
+            id="dep-input"
+            label="Departure airport"
+            placeholder="Search city or IATA code"
+            bind:value={depSearch}
+            items={depResults}
+            status={resultsStatus(depResults.length)}
+            onInput={onDepInput}
+            onSelect={selectDep}
+        >
+            {#snippet option(a)}
+                <span><strong class="iata">{a.iata}</strong> {a.name}</span>
+                <small>{a.city}, {a.country}</small>
+            {/snippet}
+        </Combobox>
 
-        <div class="field" bind:this={arrRootEl}>
-            <label class="field-label" for="arr-input">Arrival airport</label>
-            <input
-                id="arr-input"
-                type="text"
-                placeholder="Search city or IATA code"
-                bind:value={arrSearch}
-                oninput={onArrInput}
-                onkeydown={onArrKeyDown}
-                autocomplete="off"
-            />
-            {#if arrResults.length > 0}
-                <ul class="results" role="listbox">
-                    {#each arrResults as r, i}
-                        <li>
-                            <button type="button" class="result" class:active={i === arrActiveIndex} role="option" aria-selected={i === arrActiveIndex} onclick={() => selectArr(r)}>
-                                <span><strong>{r.iata}</strong> {r.name}</span>
-                                <small>{r.city}, {r.country}</small>
-                            </button>
-                        </li>
-                    {/each}
-                </ul>
-            {/if}
-        </div>
+        <Combobox
+            id="arr-input"
+            label="Arrival airport"
+            placeholder="Search city or IATA code"
+            bind:value={arrSearch}
+            items={arrResults}
+            status={resultsStatus(arrResults.length)}
+            onInput={onArrInput}
+            onSelect={selectArr}
+        >
+            {#snippet option(a)}
+                <span><strong class="iata">{a.iata}</strong> {a.name}</span>
+                <small>{a.city}, {a.country}</small>
+            {/snippet}
+        </Combobox>
 
         <div class="time-row">
             <div class="field">
@@ -257,20 +209,14 @@
             </div>
         </div>
         <p class="time-hint">Enter local times at each airport, as shown on your ticket.</p>
-    </div>
 
-    {#if errorMessage}
-        <p class="error" aria-live="polite">{errorMessage}</p>
-    {/if}
+        <p class="error-text form-error" role="alert">{errorMessage}</p>
 
-    <div class="actions">
-        <button class="btn primary" onclick={submit}>
-            Predict In-Flight Sun Views
-        </button>
-        <button class="btn link" onclick={onSwitchMode}>
-            ← Back to location mode
-        </button>
-    </div>
+        <div class="actions">
+            <button class="btn primary" type="submit">Predict In-Flight Sun Views</button>
+            <button class="btn link" type="button" onclick={onSwitchMode}>← Back to location mode</button>
+        </div>
+    </form>
 </div>
 
 <style>
@@ -278,36 +224,21 @@
     .fields { display: flex; flex-direction: column; gap: 1rem; }
     .field { position: relative; }
     .field-label { display: block; font-size: 0.85rem; margin-bottom: 0.35rem; opacity: 0.9; }
-    .time-hint { margin: 0; font-size: 0.8rem; opacity: 0.75; }
+    .time-hint { margin: 0; font-size: 0.8rem; opacity: 0.85; }
     .time-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.75rem; }
     .lookup-section { display: flex; flex-direction: column; gap: 0.35rem; }
     .lookup-row { display: flex; gap: 0.5rem; }
     .lookup-row input[type="text"] { flex: 1; }
     .lookup-row input[type="date"] { width: auto; }
-    .divider { text-align: center; opacity: 0.6; font-size: 0.85rem; margin: 0.25rem 0; }
-    .divider span { background: transparent; padding: 0 0.5rem; }
+    .divider { text-align: center; opacity: 0.85; font-size: 0.85rem; margin: 0.25rem 0; }
     .actions { display: flex; flex-direction: column; gap: 0.5rem; align-items: stretch; }
-    .btn {
-        padding: 0.75rem 1rem;
-        border-radius: 10px;
-        border: 1px solid var(--text-accent);
-        background: rgba(255,255,255,0.08);
-        color: var(--text-primary);
-        cursor: pointer;
-        transition: transform 0.15s ease, background 0.2s ease;
-        backdrop-filter: blur(8px);
-    }
-    .btn:hover { transform: translateY(-1px); background: rgba(255,255,255,0.14); }
-    .btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+    .btn { border-color: var(--text-accent); }
     .btn.primary { font-weight: 600; }
-    .btn.link { background: transparent; border: none; font-size: 0.9rem; opacity: 0.8; }
-    .btn.link:hover { opacity: 1; transform: none; background: transparent; }
-    .error { color: #ffd3d3; margin: 0; }
-    .results { position: absolute; z-index: 10; top: 100%; left: 0; right: 0; margin: 0.35rem 0 0; padding: 0; list-style: none; display: grid; gap: 0.35rem; max-height: 220px; overflow-y: auto; }
-    .result { width: 100%; display: flex; align-items: center; justify-content: space-between; padding: 0.5rem 0.75rem; border-radius: 10px; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.14); cursor: pointer; color: var(--text-primary); backdrop-filter: blur(12px); }
-    .result:hover { background: rgba(255,255,255,0.14); }
-    .result.active { border-color: var(--text-accent); background: rgba(255,255,255,0.14); }
-    .result strong { color: var(--text-accent); margin-right: 0.5rem; }
+    .btn.link { background: transparent; border: none; font-size: 0.9rem; }
+    .btn.link:hover { transform: none; text-decoration: underline; }
+    /* Stays mounted (and in the accessibility tree) so new errors are announced. */
+    .form-error { margin: 0; }
+    .iata { color: var(--text-accent); margin-right: 0.35rem; }
 
     @media (max-width: 520px) {
         .time-row { grid-template-columns: 1fr; }

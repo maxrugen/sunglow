@@ -18,12 +18,20 @@
         return sided.map((s) => `${s.seatSide === 'left' ? 'Left' : 'Right'} side for the ${s.event}`).join(', ') + '.';
     });
 
-    function formatUTCTime(isoStr: string | undefined) {
-        if (!isoStr) return '--';
+    /**
+     * The event time where the plane is (matching how Location mode shows
+     * times), plus the viewer's own time when that zone differs.
+     */
+    function formatEventTime(isoStr: string, timeZone?: string): { local: string; yours: string | null } {
+        const date = new Date(isoStr);
+        const fmt = (zone?: string) =>
+            new Intl.DateTimeFormat(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit', timeZoneName: 'short', timeZone: zone }).format(date);
         try {
-            return new Intl.DateTimeFormat(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }).format(new Date(isoStr));
+            const local = fmt(timeZone);
+            const yours = fmt();
+            return { local, yours: timeZone && yours !== local ? yours : null };
         } catch {
-            return '--';
+            return { local: fmt(), yours: null };
         }
     }
 
@@ -75,14 +83,16 @@
 </script>
 
 <section class="card">
-    {#if prediction?.route}
-        <p class="route">
-            <strong>{prediction.route.departure.iata}</strong> → <strong>{prediction.route.arrival.iata}</strong>
-        </p>
-    {/if}
+    <h2 id="flight-result-heading" class="route" tabindex="-1">
+        {#if prediction?.route}
+            {prediction.route.departure.iata} → {prediction.route.arrival.iata}
+        {:else}
+            Your flight
+        {/if}
+    </h2>
 
     {#if sightings.length === 0}
-        <h2>No Sunrise or Sunset During This Flight</h2>
+        <h3 class="title">No Sunrise or Sunset During This Flight</h3>
         <p class="message">{prediction?.message || 'The sun neither rises nor sets during this flight.'}</p>
     {:else}
         {#if sideSummary}
@@ -91,14 +101,15 @@
 
         {#each sightings as s (s.timeUTC + s.event)}
             {@const copy = EVENT_COPY[s.event]}
+            {@const time = formatEventTime(s.timeUTC, s.timeZone)}
             <div class="sighting">
                 {#if s.qualityScore != null}
-                    <h2>
+                    <h3 class="title">
                         In-Flight {copy.title}: <span class="accent">{s.qualityScore}%</span>
                         <small class="badge">{scoreLabel(s.qualityScore)}</small>
-                    </h2>
+                    </h3>
                 {:else}
-                    <h2>{copy.title} During Your Flight</h2>
+                    <h3 class="title">{copy.title} During Your Flight</h3>
                     <p class="message">No weather forecast is available for this date yet, so there is no quality score. The seat recommendation is still valid.</p>
                 {/if}
 
@@ -115,7 +126,10 @@
                 <div class="metrics">
                     <div class="row">
                         <span>{copy.title} time</span>
-                        <strong>{formatUTCTime(s.timeUTC)}</strong>
+                        <strong>
+                            {time.local}
+                            {#if time.yours}<small class="your-time">{time.yours} your time</small>{/if}
+                        </strong>
                     </div>
                     <div class="row">
                         <span>Plane position</span>
@@ -143,7 +157,7 @@
 
                 {#if s.explanation?.factors}
                     <div class="explain">
-                        <h3>Why this score?</h3>
+                        <h4>Why this score?</h4>
                         <p>{buildExplanation(s)}</p>
                     </div>
                 {/if}
@@ -152,29 +166,18 @@
         <p class="note">Note: Weather data is based on surface-level forecasts. Actual conditions at cruise altitude may differ.</p>
     {/if}
 
-    <button class="btn back-btn" onclick={onBack}>
-        ← New prediction
+    <button class="btn back-btn" type="button" onclick={onBack}>
+        ← Edit flight
     </button>
 </section>
 
 <style>
-    .card {
-        width: 100%;
-        max-width: 640px;
-        padding: 1.25rem 1.25rem 1rem;
-        border-radius: 16px;
-        background: rgba(0,0,0,0.18);
-        border: 1px solid rgba(255,255,255,0.18);
-        box-shadow: 0 10px 30px rgba(0,0,0,0.25);
-        backdrop-filter: blur(12px);
-        color: var(--text-primary);
-    }
-    h2 { margin: 0 0 0.75rem; font-weight: 700; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+    .title { margin: 0 0 0.75rem; font-size: 1.4rem; font-weight: 700; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
     .accent { color: var(--text-accent); }
     .badge { font-size: 0.9rem; padding: 0.25rem 0.5rem; border-radius: 999px; border: 1px solid currentColor; opacity: 0.9; }
-    .route { margin: 0 0 0.75rem; font-size: 1.1rem; opacity: 0.95; }
+    .route { margin: 0 0 0.75rem; font-size: 1.1rem; font-weight: 600; }
     .side-summary { margin: 0 0 0.75rem; font-weight: 600; color: var(--text-accent); }
-    .sighting + .sighting { margin-top: 1.25rem; padding-top: 1.25rem; border-top: 1px solid rgba(255,255,255,0.18); }
+    .sighting + .sighting { margin-top: 1.25rem; padding-top: 1.25rem; border-top: 1px solid var(--border); }
     .highlight { margin-bottom: 1rem; }
     .seat-rec {
         display: flex;
@@ -182,30 +185,25 @@
         gap: 0.75rem;
         padding: 0.75rem 1rem;
         border-radius: 12px;
-        background: rgba(255,255,255,0.08);
+        background: var(--surface);
         border: 1px solid var(--text-accent);
     }
     .seat-icon { font-size: 1.5rem; }
     .seat-rec strong { display: block; font-size: 1.05rem; color: var(--text-accent); }
-    .seat-rec small { opacity: 0.8; font-size: 0.9rem; }
+    .seat-rec small { font-size: 0.9rem; }
     .metrics { display: grid; gap: 0.6rem; }
     .row { display: flex; align-items: center; justify-content: space-between; }
-    .row strong { font-weight: 600; }
+    .row strong { font-weight: 600; text-align: right; }
+    .your-time { display: block; font-weight: 400; font-size: 0.8rem; }
     .message { opacity: 0.9; margin: 0.5rem 0; }
     .explain { margin-top: 1rem; opacity: 0.95; }
-    .explain h3 { margin: 0 0 0.5rem; font-size: 1rem; }
-    .note { font-size: 0.85rem; opacity: 0.7; margin: 1rem 0 0; font-style: italic; }
+    .explain h4 { margin: 0 0 0.5rem; font-size: 1rem; }
+    .note { font-size: 0.85rem; opacity: 0.85; margin: 1rem 0 0; font-style: italic; }
     .back-btn {
         margin-top: 1rem;
         width: 100%;
         background: transparent;
-        border: 1px solid rgba(255,255,255,0.2);
-        color: var(--text-primary);
         padding: 0.6rem;
-        border-radius: 10px;
-        cursor: pointer;
         font-size: 0.95rem;
     }
-    .back-btn:hover { background: rgba(255,255,255,0.08); }
-    .btn { transition: transform 0.15s ease, background 0.2s ease; }
 </style>

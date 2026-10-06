@@ -1,8 +1,15 @@
+/* Neutral theme until a score arrives; src/lib/score.ts swaps these per score band. */
 :root {
-  --background-start: #3e4a61; /* Poor default */
-  --background-end: #939fab;
-  --text-primary: #e0e0e0;
+  --background-start: #3e4a61;
+  --background-end: #5d6878;
+  --text-primary: #eef0f3;
   --text-accent: #ffffff;
+  --surface: rgba(0, 0, 0, 0.22);
+  --surface-strong: rgba(38, 46, 61, 0.96);
+  --border: rgba(255, 255, 255, 0.22);
+  --placeholder: rgba(255, 255, 255, 0.75);
+  --error: #ffe6e6;
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
@@ -21,52 +28,66 @@ button, input {
 
 /* Minimal, clean buttons */
 button {
-  background: rgba(255,255,255,0.08);
+  background: var(--surface);
   color: var(--text-primary);
-  border: 1px solid rgba(255,255,255,0.2);
+  border: 1px solid var(--border);
   border-radius: 10px;
   padding: 0.75rem 1rem;
   cursor: pointer;
   transition: transform 150ms ease, background 200ms ease, opacity 200ms ease;
   backdrop-filter: blur(8px);
 }
-button:hover { transform: translateY(-1px); background: rgba(255,255,255,0.14); }
+button:hover { transform: translateY(-1px); filter: brightness(1.1); }
 button:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
 
 /* Inputs */
-input[type="text"], input[type="search"], input[type="number"] {
-  background: rgba(255,255,255,0.08);
+input[type="text"], input[type="search"], input[type="number"], input[type="date"], input[type="time"] {
+  background: var(--surface);
   color: var(--text-primary);
-  border: 1px solid rgba(255,255,255,0.2);
+  border: 1px solid var(--border);
   border-radius: 10px;
   padding: 0.75rem 1rem;
   width: 100%;
-  outline: none;
   transition: border-color 200ms ease, background 200ms ease;
 }
-input::placeholder { color: rgba(255,255,255,0.7); }
-input:focus { border-color: var(--text-accent); background: rgba(255,255,255,0.12); }
+input::placeholder { color: var(--placeholder); }
+input:focus { border-color: var(--text-accent); }
+
+/* Keyboard focus must always be visible (WCAG 2.4.7); mouse clicks don't show it. */
+:focus { outline: none; }
+:focus-visible {
+  outline: 2px solid var(--text-accent);
+  outline-offset: 2px;
+}
 
 /* Card base */
 .card {
-  background: rgba(0,0,0,0.18);
-  border: 1px solid rgba(255,255,255,0.18);
+  width: 100%;
+  max-width: 640px;
+  padding: 1.25rem 1.25rem 1rem;
+  color: var(--text-primary);
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 16px;
-  box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
   backdrop-filter: blur(12px);
 }
+
+.error-text { color: var(--error); }
 
 /* Utility */
 .visually-hidden {
   position: absolute !important;
-  height: 1px; width: 1px;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
   overflow: hidden;
-  clip: rect(1px, 1px, 1px, 1px);
-  white-space: nowrap; /* added line */
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
 }
-
-
