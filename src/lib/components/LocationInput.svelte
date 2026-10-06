@@ -17,6 +17,9 @@
     let resultsStatus: string = $state('');
     let debounceHandle: ReturnType<typeof setTimeout>;
     let searchSeq = 0;
+    // Part of the request URL so browsers can't reuse answers cached (up to a day) before a
+    // search change. Bump it whenever /api/geocode starts finding things it didn't before.
+    const SEARCH_VERSION = 2;
 
     function select(r: GeocodeResult) {
         results = [];
@@ -41,7 +44,7 @@
         isSearching = true;
         errorMessage = '';
         try {
-            const res = await fetch(`/api/geocode?q=${encodeURIComponent(q)}`);
+            const res = await fetch(`/api/geocode?q=${encodeURIComponent(q)}&v=${SEARCH_VERSION}`);
             if (!res.ok) throw new Error('City search is unavailable right now. Try again in a moment.');
             const data = await res.json();
             if (seq !== searchSeq) return;
