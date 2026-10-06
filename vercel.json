@@ -4,11 +4,6 @@
     "installCommand": "npm install",
     "framework": "sveltekit",
     "outputDirectory": ".svelte-kit",
-    "build": {
-        "env": {
-            "NODE_VERSION": "20"
-        }
-    },
     "crons": [
         {
             "path": "/api/cron",

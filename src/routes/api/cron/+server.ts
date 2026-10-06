@@ -8,7 +8,7 @@ import { pushSubscriptions } from '$lib/server/db/schema';
 import { sendPush } from '$lib/server/webpush';
 import { predictSunset } from '$lib/server/prediction';
 
-export const config = { runtime: 'nodejs20.x', maxDuration: 60 };
+export const config = { maxDuration: 60 };
 
 function num(value: string | undefined, fallback: number): number {
   const n = Number(value);

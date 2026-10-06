@@ -5,8 +5,6 @@ import { db } from '$lib/server/db';
 import { pushSubscriptions } from '$lib/server/db/schema';
 import { pushRequestAuthorized } from '$lib/server/push-auth';
 
-export const config = { runtime: 'nodejs20.x' };
-
 export const POST: RequestHandler = async ({ request }) => {
   if (!pushRequestAuthorized(request)) {
     return json({ error: 'unauthorized' }, { status: 401 });
