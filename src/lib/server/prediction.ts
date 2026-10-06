@@ -202,7 +202,8 @@ export async function predictEvent({
       ? Math.abs(selectedEpochSec - targetSec) <= 1800 // within 30 minutes of the event
       : false;
 
-  const { score: qualityScore, details, confidence } = evaluate(weatherData, alignedToEvent);
+  const leadHours = targetSec != null ? Math.max(0, (targetSec * 1000 - Date.now()) / 3600_000) : 0;
+  const { score: qualityScore, details, confidence } = evaluate(weatherData, alignedToEvent, leadHours);
 
   const payload: PredictionPayload = {
     event,

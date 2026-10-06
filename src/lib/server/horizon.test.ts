@@ -32,13 +32,13 @@ describe('sunAzimuth()', () => {
 });
 
 describe('horizonBlocking()', () => {
-  it('weights the 150 km sample most and counts half of mid cloud', () => {
+  it('weights the far samples most and counts half of mid cloud', () => {
     const blocking = horizonBlocking([
       { km: 50, lowCloud: 0, midCloud: 0 },
       { km: 150, lowCloud: 100, midCloud: 0 },
       { km: 300, lowCloud: 0, midCloud: 40 },
     ]);
-    expect(blocking).toBeCloseTo(0.4 * 100 + 0.35 * 20);
+    expect(blocking).toBeCloseTo(0.45 * 100 + 0.45 * 20);
   });
 
   it('caps each sample at 100%', () => {

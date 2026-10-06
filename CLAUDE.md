@@ -73,4 +73,4 @@ Generate with `npm run db:generate`; apply each new `drizzle/000N_*.sql` to Neon
 - Flight times without an offset are wall-clock times local to each airport. The zone comes from coordinates (`@photostructure/tz-lookup`) because `airports.json` has no zone data. The arrival date is resolved as the first matching local time after departure (flights < 24 h).
 - Flight weather is only available up to 16 days ahead; beyond that the response has no score but still has the seat side.
 - `predictEvent()` is shared by the API route, the deep-link load and the cron, so changes affect alerts too.
-- The low-cloud multiplier (ground model) scales the cloud score *and* every positive adjustment: if the sun can't get through, nothing else can add color. Penalties are not scaled.
+- Scoring v2 (ground): `(45 clear-sky base + 45 × cloud canvas) × light`, where light = low-cloud multiplier × horizon factor. Bonuses are small and scaled by the same light gates; penalties are not. Keep `scoring-scenarios.test.ts` (reference skies → labels) passing, and bump `SCORING_VERSION` for any change that moves scores.

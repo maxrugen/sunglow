@@ -7,13 +7,14 @@ const EARTH_RADIUS_KM = 6371;
 
 /**
  * Points sampled toward the sun at sunrise or sunset. Light that colors high
- * clouds overhead around the event grazes the surface roughly 100–300 km away in the sun's
- * direction, so the middle samples count most.
+ * clouds overhead around the event grazes the surface roughly 100–300 km away
+ * in the sun's direction, so those samples count most. The nearest one weighs
+ * little because local low cloud is already scored separately.
  */
 export const HORIZON_SAMPLES = [
-  { km: 50, weight: 0.25 },
-  { km: 150, weight: 0.4 },
-  { km: 300, weight: 0.35 },
+  { km: 50, weight: 0.1 },
+  { km: 150, weight: 0.45 },
+  { km: 300, weight: 0.45 },
 ] as const;
 
 /** Mid cloud blocks the grazing light less than low cloud does. */

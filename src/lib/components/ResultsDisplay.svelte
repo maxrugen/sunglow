@@ -44,9 +44,11 @@
             parts.push('Extensive low clouds likely blocked the sun near the horizon.');
         }
         // Clouds toward the rising/setting sun
-        if (fx.horizon?.net < 0) {
+        // `state` since scoring v2; older payloads only had the sign of `net`.
+        const horizonState = fx.horizon?.state ?? (fx.horizon?.net < 0 ? 'blocked' : fx.horizon?.net > 0 ? 'clear' : undefined);
+        if (horizonState === 'blocked' || horizonState === 'partial') {
             parts.push(`Clouds toward the ${copy.sunAdjective} sun may block the light before it reaches the sky overhead.`);
-        } else if (fx.horizon?.net > 0) {
+        } else if (horizonState === 'clear') {
             parts.push(`The sky toward the ${copy.sunAdjective} sun looks clear, so light can reach the clouds overhead.`);
         }
         // High clouds canvas
@@ -77,6 +79,7 @@
         if (fx.aod?.value) {
             const a = fx.aod.value;
             if (a > 0.15 && a < 0.4) parts.push('Moderate aerosols can enhance vibrancy.');
+            else if (a > 0.5) parts.push('Smoke or dust in the air is likely to mute the colors.');
         }
         if (fx.pm25?.ugm3 !== undefined && fx.pm25.ugm3 > 60) parts.push('Heavy particulates may dull the view.');
         // Wind / pressure
