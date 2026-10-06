@@ -1,13 +1,14 @@
 import * as env from '$app/env/private';
 import type { PageServerLoad } from './$types';
 import { predictEvent } from '#lib/server/prediction.js';
-import { createRatingToken } from '#lib/server/ratings.js';
+import { createRatingToken, ratingRequestFrom } from '#lib/server/ratings.js';
 import { cleanLabel, parseLatLon } from '#lib/server/validate.js';
 import type { SkyEvent } from '#lib/types.js';
 
 /**
  * Server-render a prediction for deep links like /?lat=…&lon=…&label=…&event=sunrise
  * (e.g. from push notifications). `event` alone preselects the Sunset/Sunrise switch.
+ * `?rate=<token>` (the "How was it?" follow-up) asks for a rating of that prediction.
  */
 export const load: PageServerLoad = async ({ url }) => {
   const label = cleanLabel(url.searchParams.get('label')) ?? '';
@@ -15,15 +16,18 @@ export const load: PageServerLoad = async ({ url }) => {
   const event: SkyEvent | undefined = eventParam === 'sunrise' || eventParam === 'sunset' ? eventParam : undefined;
   // Lets the flight form offer flight-number/route search without probing (and spending quota on) the API.
   const flightLookupAvailable = Boolean(env.AIRLABS_API_KEY);
+  const rate = url.searchParams.get('rate');
+  const ratingRequest = rate ? ratingRequestFrom(rate, label) : null;
 
   const coords = parseLatLon(url.searchParams.get('lat'), url.searchParams.get('lon'));
-  if (!coords) return { flightLookupAvailable, event };
+  if (!coords) return { flightLookupAvailable, event, ratingRequest };
   const { latitude, longitude } = coords;
 
   try {
     const payload = await predictEvent({ latitude, longitude, event: event ?? 'sunset' });
     return {
       flightLookupAvailable,
+      ratingRequest,
       event: payload.event,
       ssr: {
         event: payload.event,
@@ -41,6 +45,6 @@ export const load: PageServerLoad = async ({ url }) => {
     };
   } catch {
     // Fall back to the search view; the client can retry from there.
-    return { flightLookupAvailable, event };
+    return { flightLookupAvailable, event, ratingRequest };
   }
 };

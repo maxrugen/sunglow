@@ -4,7 +4,7 @@ import { mockEnv } from '#lib/server/test-env.js';
 const env = mockEnv();
 vi.mock('$app/env/private', () => env);
 
-const { createRatingToken, verifyRatingToken, inRatingWindow, ratingsConfigured } = await import('./ratings');
+const { createRatingToken, verifyRatingToken, inRatingWindow, ratingsConfigured, ratingRequestFrom } = await import('./ratings');
 const { SCORING_VERSION } = await import('./scoring');
 
 const prediction = {
@@ -87,5 +87,29 @@ describe('inRatingWindow()', () => {
     expect(inRatingWindow(sunset, (sunset - 10 * 60) * 1000)).toBe(true);
     expect(inRatingWindow(sunset, (sunset + 23 * 3600) * 1000)).toBe(true);
     expect(inRatingWindow(sunset, (sunset + 25 * 3600) * 1000)).toBe(false);
+  });
+});
+
+describe('ratingRequestFrom()', () => {
+  const eventMs = prediction.timings.eventEpochSec * 1000;
+
+  it('turns a follow-up link token into a rating request', () => {
+    const token = createRatingToken(prediction)!;
+    expect(ratingRequestFrom(token, 'Berlin', eventMs + 3600 * 1000)).toEqual({
+      token,
+      label: 'Berlin',
+      event: 'sunset',
+      eventEpochSec: prediction.timings.eventEpochSec,
+      predictedScore: 82,
+    });
+    expect(ratingRequestFrom(token, '', eventMs)?.label).toBe('your location');
+  });
+
+  it('ignores forged tokens and ones whose window has closed', () => {
+    const token = createRatingToken(prediction)!;
+    expect(ratingRequestFrom(`${token}x`, 'Berlin', eventMs)).toBeNull();
+    expect(ratingRequestFrom('garbage', 'Berlin', eventMs)).toBeNull();
+    expect(ratingRequestFrom(token, 'Berlin', eventMs + 25 * 3600 * 1000)).toBeNull();
+    expect(ratingRequestFrom(token, 'Berlin', eventMs - 3600 * 1000)).toBeNull();
   });
 });

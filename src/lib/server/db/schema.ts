@@ -39,6 +39,10 @@ export const pushSubscriptions = pgTable(
     lastSunriseEveningDate: text('last_sunrise_evening_date'),
     /** Local YYYY-MM-DD of the sunrise last handled by the ~1 h-before alert. */
     lastSunriseMorningDate: text('last_sunrise_morning_date'),
+    /** Signed snapshot (see ratings.ts) of the last alerted prediction, for the "How was it?" follow-up. */
+    ratingToken: text('rating_token'),
+    /** When to send that follow-up (shortly after the event); cleared once sent. */
+    ratingFollowupAt: ts('rating_followup_at'),
     createdAt: ts('created_at').notNull().defaultNow(),
   },
   (t) => [uniqueIndex('push_endpoint_uq').on(t.endpoint)]

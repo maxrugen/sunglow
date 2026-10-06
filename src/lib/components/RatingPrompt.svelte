@@ -1,6 +1,8 @@
 <script lang="ts">
     import { onMount } from 'svelte';
-    import { deviceId, dueRating, forgetRating, type PendingRating } from '#lib/rating-store.js';
+    import { goto } from '$app/navigation';
+    import { page } from '$app/state';
+    import { deviceId, dueRating, forgetRating, rememberPending, type PendingRating } from '#lib/rating-store.js';
     import { errorMessageFrom } from '#lib/http.js';
 
     const CHOICES = [
@@ -11,12 +13,29 @@
         { value: 5, label: 'Spectacular' }
     ];
 
+    interface Props {
+        /** From a follow-up notification link (`/?rate=…`): ask about this one first. */
+        request?: PendingRating | null;
+    }
+
+    let { request = null }: Props = $props();
+
     let pending: PendingRating | null = $state(null);
     let status: 'idle' | 'sending' | 'thanks' | 'error' = $state('idle');
     let message = $state('');
 
     onMount(() => {
-        pending = dueRating();
+        if (request) {
+            // Kept like a viewed prediction, so a reload still asks; the link itself is single-use.
+            rememberPending(request);
+            pending = request;
+            const url = new URL(page.url.href);
+            url.searchParams.delete('rate');
+            url.searchParams.delete('label');
+            goto(url, { shallow: true, replace: true });
+        } else {
+            pending = dueRating();
+        }
     });
 
     async function rate(value: number) {
