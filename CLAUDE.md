@@ -38,7 +38,7 @@ Sunglow is a SvelteKit app (Svelte 5, runes) that predicts sunset quality for a 
 ### Push alerts
 
 - `PushSubscribeButton.svelte` subscribes via `src/service-worker.ts` and POSTs to `/api/push/subscribe` (Neon via Drizzle, `src/lib/server/db/`).
-- `/api/cron` runs hourly (GitHub Actions `cron.yml`; Vercel Hobby cron is only daily). It notifies subscribers whose sunset is 2–3 h away and scores ≥ `SUNSET_SCORE_MIN`, deduped per day via `lastNotifiedDate`.
+- `/api/cron` runs hourly via a cron-job.org job (Vercel Hobby cron is only daily; GitHub Actions schedules ran hours late, so `cron.yml` is manual-only now). It notifies subscribers whose sunset is 2–3 h away and scores ≥ `SUNSET_SCORE_MIN`, deduped per day via `lastNotifiedDate`.
 - `/api/cron` requires `Authorization: Bearer $CRON_SECRET`; without a secret it's only open in dev.
 
 ### Sunset ratings
