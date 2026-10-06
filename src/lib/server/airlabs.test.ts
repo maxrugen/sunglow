@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import fixture from './__fixtures__/airlabs-routes-IAD-SLC.json';
 import delta from './__fixtures__/airlabs-routes-JFK-LAX-DL.json';
-import { flightsOn, operatesOn, toScheduledFlights, weekdayOf } from './airlabs';
+import busyRoute from './__fixtures__/airlabs-routes-JFK-LAX-page1.json';
+import { flightsOn, hiddenCarriers, operatesOn, toScheduledFlights, weekdayOf } from './airlabs';
 
 // Recorded AirLabs /routes response for IAD → SLC (no API key inside).
 const flights = toScheduledFlights(fixture.response);
@@ -69,5 +70,18 @@ describe('flight numbers with several timetable entries', () => {
     const picked = flightsOn([stale, current], '2026-10-16').map((f) => f.depTime);
     expect(picked).toEqual(['19:00']);
     expect(flightsOn([current, stale], '2026-10-16').map((f) => f.depTime)).toEqual(['19:00']);
+  });
+});
+
+describe('hiddenCarriers()', () => {
+  it('finds airlines whose own rows were cut off, through codeshares pointing at them', () => {
+    // JFK → LAX page 1 stops at "AM": 25 AF/AM codeshare rows point to Delta flights.
+    expect(hiddenCarriers(busyRoute.response)).toEqual(['DL']);
+  });
+
+  it('ignores airlines that are already listed, and ranks by references', () => {
+    const op = (airline: string) => ({ airline_iata: airline, flight_iata: `${airline}1`, cs_flight_iata: null });
+    const cs = (airline: string, operator: string) => ({ airline_iata: airline, flight_iata: `${airline}9`, cs_airline_iata: operator, cs_flight_iata: `${operator}1` });
+    expect(hiddenCarriers([op('AA'), cs('AF', 'DL'), cs('AM', 'UA'), cs('AY', 'UA'), cs('BA', 'AA')])).toEqual(['UA', 'DL']);
   });
 });
