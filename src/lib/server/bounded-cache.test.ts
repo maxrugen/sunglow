@@ -17,6 +17,15 @@ describe('BoundedCache', () => {
     expect(cache.get('a')).toBeUndefined();
   });
 
+  it('lets an entry use its own TTL', () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(0);
+    const cache = new BoundedCache<number>(1000);
+    cache.set('short', 1, 100);
+    vi.setSystemTime(100);
+    expect(cache.get('short')).toBeUndefined();
+  });
+
   it('evicts the oldest entry at the size cap', () => {
     const cache = new BoundedCache<number>(60_000, 2);
     cache.set('a', 1);

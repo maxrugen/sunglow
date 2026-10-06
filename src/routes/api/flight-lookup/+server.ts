@@ -2,6 +2,15 @@ import { json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import type { RequestHandler } from './$types';
 import { airportByIata } from '$lib/server/airports';
+import { BoundedCache } from '$lib/server/bounded-cache';
+
+/**
+ * Schedules rarely change within hours, and every AviationStack call counts
+ * against a small monthly quota, so repeat lookups are served from memory.
+ */
+const cache = new BoundedCache<{ status: number; body: unknown }>(6 * 3600 * 1000, 200);
+/** "Not found" may just mean the schedule isn't published yet; retry sooner. */
+const NOT_FOUND_TTL_MS = 3600 * 1000;
 
 /**
  * Optional flight number lookup using AviationStack API.
@@ -30,6 +39,10 @@ export const GET: RequestHandler = async ({ url }) => {
     return json({ error: 'Invalid date format. Use YYYY-MM-DD.' }, { status: 400 });
   }
 
+  const cacheKey = `${flight}|${date ?? ''}`;
+  const cached = cache.get(cacheKey);
+  if (cached) return json(cached.body, { status: cached.status });
+
   try {
     const params = new URLSearchParams({
       access_key: apiKey,
@@ -39,31 +52,31 @@ export const GET: RequestHandler = async ({ url }) => {
       params.set('flight_date', date);
     }
 
-    const apiUrl = `https://api.aviationstack.com/v1/flights?${params.toString()}`;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10000);
-
-    const res = await fetch(apiUrl, { signal: controller.signal });
-    clearTimeout(timeout);
-
+    const res = await fetch(`https://api.aviationstack.com/v1/flights?${params.toString()}`, {
+      signal: AbortSignal.timeout(10000),
+    });
     if (!res.ok) {
+      console.error('[flight-lookup] upstream status', res.status);
       return json({ error: 'Flight lookup service unavailable.' }, { status: 502 });
     }
 
     const data = await res.json();
-
     if (data?.error) {
-      return json({ error: data.error.message || 'Flight lookup failed.' }, { status: 502 });
+      // Upstream messages can mention our plan/quota; log them instead of passing them on.
+      console.error('[flight-lookup] upstream error', data.error);
+      return json({ error: 'Flight lookup failed.' }, { status: 502 });
     }
 
     const flights = data?.data;
     if (!Array.isArray(flights) || flights.length === 0) {
-      return json({ error: 'No flights found for this code.' }, { status: 404 });
+      const body = { error: 'No flights found for this code.' };
+      cache.set(cacheKey, { status: 404, body }, NOT_FOUND_TTL_MS);
+      return json(body, { status: 404 });
     }
 
     // Take the first matching flight
     const f = flights[0];
-    return json({
+    const body = {
       flight: {
         iata: f.flight?.iata || flight,
         airline: f.airline?.name || '',
@@ -82,11 +95,12 @@ export const GET: RequestHandler = async ({ url }) => {
         timezone: f.arrival?.timezone || '',
         match: airportByIata(f.arrival?.iata ?? '') ?? null,
       },
-    });
+    };
+    cache.set(cacheKey, { status: 200, body });
+    return json(body);
   } catch (e: unknown) {
-    const message = e instanceof Error && e.name === 'AbortError'
-      ? 'Flight lookup timed out.'
-      : 'Flight lookup failed.';
-    return json({ error: message }, { status: 502 });
+    const timedOut = e instanceof Error && (e.name === 'TimeoutError' || e.name === 'AbortError');
+    console.error('[flight-lookup]', e);
+    return json({ error: timedOut ? 'Flight lookup timed out.' : 'Flight lookup failed.' }, { status: 502 });
   }
 };

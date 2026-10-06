@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import SunCalc from 'suncalc';
-import { nextEvent, predictEvent } from './prediction';
+import { nextEvent, predictEvent, roundCoord } from './prediction';
 
 // New York, 2026-06-10: local midnight is 04:00Z, sunset ≈ 00:30Z on the 11th.
 const NYC = { latitude: 40.71, longitude: -74.0 };
@@ -192,5 +192,20 @@ describe('predictEvent() for sunrise', () => {
     const afterSunset = fetchMock.mock.calls.length;
     await predictEvent({ ...coords, event: 'sunrise' });
     expect(fetchMock.mock.calls.length).toBeGreaterThan(afterSunset);
+  });
+});
+
+describe('coordinate rounding', () => {
+  it('rounds to two decimals', () => {
+    expect(roundCoord(52.5243)).toBe(52.52);
+    expect(roundCoord(-74.0059)).toBe(-74.01);
+  });
+
+  it('serves nearby coordinates from one cache entry', async () => {
+    await predictEvent({ latitude: 40.8012, longitude: -73.9988, event: 'sunset' });
+    const calls = fetchMock.mock.calls.length;
+    const payload = await predictEvent({ latitude: 40.8049, longitude: -74.0012, event: 'sunset' });
+    expect(fetchMock.mock.calls.length).toBe(calls);
+    expect(payload.used).toMatchObject({ latitude: 40.8, longitude: -74 });
   });
 });
