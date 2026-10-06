@@ -88,8 +88,8 @@
         gap: 0.6rem;
         padding: 0.9rem 1rem;
         border-radius: 12px;
-        border: 1px solid rgba(255, 255, 255, 0.18);
-        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid var(--border);
+        background: var(--surface);
         max-width: 34rem;
         width: 100%;
     }
@@ -101,7 +101,6 @@
     .rating-title small {
         display: block;
         font-weight: 400;
-        opacity: 0.8;
     }
     .choices {
         display: flex;
@@ -117,8 +116,8 @@
         padding: 0.45rem 0.6rem;
         min-width: 4.5rem;
         border-radius: 10px;
-        border: 1px solid rgba(255, 255, 255, 0.25);
-        background: rgba(255, 255, 255, 0.1);
+        border: 1px solid var(--border);
+        background: var(--surface);
         color: var(--text-primary);
         cursor: pointer;
         font-size: 0.8rem;
@@ -129,7 +128,7 @@
         letter-spacing: -0.05em;
     }
     .choice:hover:not(:disabled) {
-        background: rgba(255, 255, 255, 0.2);
+        filter: brightness(1.15);
     }
     .choice:disabled {
         opacity: 0.6;
@@ -139,16 +138,16 @@
         background: transparent;
         border: none;
         color: var(--text-primary);
-        opacity: 0.75;
+        text-decoration: underline;
         cursor: pointer;
         font-size: 0.85rem;
     }
     .skip:hover {
-        opacity: 1;
+        transform: none;
     }
     .rating-error {
         margin: 0;
-        color: #ffd3d3;
+        color: var(--error);
         font-size: 0.85rem;
     }
 </style>

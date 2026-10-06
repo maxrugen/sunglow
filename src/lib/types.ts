@@ -90,6 +90,8 @@ export type FlightSighting = {
   seatRecommendation: string;
   /** UTC time of the event at the best waypoint */
   timeUTC: string;
+  /** IANA time zone at the plane's position, for showing the local time */
+  timeZone?: string;
   /** Where the plane is at the time (lat/lon label) */
   location: string;
   waypoint: EventWaypoint;

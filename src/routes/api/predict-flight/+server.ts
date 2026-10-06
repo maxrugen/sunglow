@@ -101,6 +101,7 @@ async function toSighting(wp: EventWaypoint): Promise<FlightSighting> {
     seatSide,
     seatRecommendation,
     timeUTC: new Date(wp.eventTime).toISOString(),
+    timeZone: timeZoneAt(wp.lat, wp.lon),
     location: `${Math.abs(wp.lat).toFixed(1)}°${latDir}, ${Math.abs(wp.lon).toFixed(1)}°${lonDir}`,
     waypoint: wp,
   };

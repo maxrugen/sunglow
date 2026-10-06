@@ -6,8 +6,8 @@
     import FlightResultsDisplay from '$lib/components/FlightResultsDisplay.svelte';
     import RatingPrompt from '$lib/components/RatingPrompt.svelte';
     import { rememberForRating } from '$lib/rating-store';
-    import { onMount, untrack } from 'svelte';
-    import { applyScoreTheme } from '$lib/score';
+    import { onMount, tick, untrack } from 'svelte';
+    import { applyScoreTheme, resetScoreTheme, scoreLabel } from '$lib/score';
     import { errorMessageFrom } from '$lib/http';
     import { reverseGeocode } from '$lib/reverse-geocode';
     import { toClientPrediction, type ClientPrediction, type FlightPredictionResponse, type SkyEvent } from '$lib/types';
@@ -15,6 +15,8 @@
     import type { PageData } from './$types';
 
     let { data }: { data: PageData } = $props();
+
+    type FlightRequest = { depIata: string; arrIata: string; depTime: string; arrTime: string };
 
     let mode: 'location' | 'flight' = $state('location');
 
@@ -24,7 +26,6 @@
     const ssr = untrack(() => data.ssr);
     let predictionData: ClientPrediction | null = $state(ssr ? toClientPrediction(ssr) : null);
     let isLoading: boolean = $state(false);
-    let errorMessage: string = $state('');
     let location: { latitude: number; longitude: number } | null = $state(
         ssr ? { latitude: ssr.latitude, longitude: ssr.longitude } : null
     );
@@ -37,14 +38,45 @@
     let flightPrediction: FlightPredictionResponse | null = $state(null);
     let isFlightLoading: boolean = $state(false);
 
+    // Shared feedback: an always-mounted status line for screen readers, and
+    // an error panel that can repeat the failed action.
+    let statusMessage: string = $state('');
+    let errorMessage: string = $state('');
+    let retryAction: (() => void) | null = $state(null);
+    // Only the latest request may update the screen (e.g. after a quick Sunset/Sunrise switch).
+    let requestSeq = 0;
+
+    function friendlyError(err: unknown, fallback: string): string {
+        if (err instanceof TypeError) return "Can't reach Sunglow right now. Check your connection and try again.";
+        return err instanceof Error && err.message ? err.message : fallback;
+    }
+
+    function showError(message: string, retry: () => void) {
+        errorMessage = message;
+        retryAction = retry;
+        statusMessage = '';
+    }
+
+    function clearError() {
+        errorMessage = '';
+        retryAction = null;
+    }
+
+    async function focusById(id: string) {
+        await tick();
+        document.getElementById(id)?.focus();
+    }
+
     function rememberLocation(latitude: number, longitude: number) {
         try { localStorage.setItem('sunglow:last', JSON.stringify({ latitude, longitude, label: locationLabel })); } catch {}
     }
 
     async function fetchPrediction(latitude: number, longitude: number) {
+        const seq = ++requestSeq;
         isLoading = true;
-        errorMessage = '';
+        clearError();
         predictionData = null;
+        statusMessage = `Loading ${EVENT_COPY[selectedEvent].noun} prediction…`;
 
         try {
             const res = await fetch('/api/predict', {
@@ -52,16 +84,21 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ latitude, longitude, event: selectedEvent })
             });
-            if (!res.ok) throw new Error(await errorMessageFrom(res, 'Prediction request failed'));
+            if (!res.ok) throw new Error(await errorMessageFrom(res, 'The prediction failed. Try again in a moment.'));
+            const prediction = toClientPrediction(await res.json());
+            if (seq !== requestSeq) return;
 
-            predictionData = toClientPrediction(await res.json());
-            applyScoreTheme(predictionData.qualityScore);
+            predictionData = prediction;
+            applyScoreTheme(prediction.qualityScore);
             rememberLocation(latitude, longitude);
-            rememberForRating(predictionData, locationLabel);
+            rememberForRating(prediction, locationLabel);
+            statusMessage = `${EVENT_COPY[prediction.event].title} quality ${prediction.qualityScore}%, ${scoreLabel(prediction.qualityScore)}.`;
+            focusById('result-heading');
         } catch (err) {
-            errorMessage = err instanceof Error ? err.message : 'An unexpected error occurred.';
+            if (seq !== requestSeq) return;
+            showError(friendlyError(err, 'The prediction failed.'), () => fetchPrediction(latitude, longitude));
         } finally {
-            isLoading = false;
+            if (seq === requestSeq) isLoading = false;
         }
     }
 
@@ -77,8 +114,14 @@
         fetchPrediction(latitude, longitude);
     }
 
-    function onLocationError({ message }: { message: string }) {
-        errorMessage = message || 'Failed to get location.';
+    function newSearch() {
+        requestSeq++;
+        predictionData = null;
+        isLoading = false;
+        clearError();
+        statusMessage = '';
+        resetScoreTheme();
+        focusById('city-input');
     }
 
     // Note: we no longer auto-load the last location on mount so that a reload returns to the search view.
@@ -86,8 +129,8 @@
         if (event === selectedEvent) return;
         selectedEvent = event;
         try { localStorage.setItem('sunglow:event', event); } catch {}
-        // Re-run the prediction for the location already on screen.
-        if (location && (predictionData || errorMessage)) fetchPrediction(location.latitude, location.longitude);
+        // Re-run the prediction for the location on screen (also if one is still loading).
+        if (location && (predictionData || isLoading || errorMessage)) fetchPrediction(location.latitude, location.longitude);
     }
 
     onMount(() => {
@@ -104,16 +147,24 @@
     });
 
     function switchMode(target: 'location' | 'flight') {
+        if (target === mode) return;
         mode = target;
-        errorMessage = '';
+        requestSeq++;
+        isLoading = false;
+        isFlightLoading = false;
+        clearError();
+        statusMessage = '';
         predictionData = null;
         flightPrediction = null;
+        resetScoreTheme();
     }
 
-    async function onFlightSubmit(flight: { depIata: string; arrIata: string; depTime: string; arrTime: string }) {
+    async function onFlightSubmit(flight: FlightRequest) {
+        const seq = ++requestSeq;
         isFlightLoading = true;
-        errorMessage = '';
+        clearError();
         flightPrediction = null;
+        statusMessage = 'Analyzing flight route…';
 
         try {
             const res = await fetch('/api/predict-flight', {
@@ -121,16 +172,29 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(flight)
             });
-            if (!res.ok) throw new Error(await errorMessageFrom(res, 'Flight prediction request failed'));
+            if (!res.ok) throw new Error(await errorMessageFrom(res, 'The flight prediction failed. Try again in a moment.'));
+            const result: FlightPredictionResponse = await res.json();
+            if (seq !== requestSeq) return;
 
-            flightPrediction = await res.json();
-            const scores = (flightPrediction?.sightings ?? []).map((s) => s.qualityScore).filter((v): v is number => v != null);
+            flightPrediction = result;
+            const scores = result.sightings.map((s) => s.qualityScore).filter((v): v is number => v != null);
             if (scores.length) applyScoreTheme(Math.max(...scores));
+            const n = result.sightings.length;
+            statusMessage = n ? `${n} ${n === 1 ? 'sunrise or sunset' : 'sunrises or sunsets'} during this flight.` : 'No sunrise or sunset during this flight.';
+            focusById('flight-result-heading');
         } catch (err) {
-            errorMessage = err instanceof Error ? err.message : 'An unexpected error occurred.';
+            if (seq !== requestSeq) return;
+            showError(friendlyError(err, 'The flight prediction failed.'), () => onFlightSubmit(flight));
         } finally {
-            isFlightLoading = false;
+            if (seq === requestSeq) isFlightLoading = false;
         }
+    }
+
+    function flightBack() {
+        flightPrediction = null;
+        statusMessage = '';
+        resetScoreTheme();
+        focusById('dep-input');
     }
 </script>
 
@@ -146,7 +210,6 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
     <meta name="theme-color" content="#0d3b66" />
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='40' fill='%23ffcc80'/></svg>">
-    <meta name="color-scheme" content="light dark" />
 </svelte:head>
 
 <main class="shell">
@@ -156,8 +219,8 @@
     </header>
 
     <nav class="mode-toggle" aria-label="Prediction mode">
-        <button class="toggle-btn" class:active={mode === 'location'} onclick={() => switchMode('location')}>Location</button>
-        <button class="toggle-btn" class:active={mode === 'flight'} onclick={() => switchMode('flight')}>Flight</button>
+        <button class="toggle-btn" class:active={mode === 'location'} aria-pressed={mode === 'location'} onclick={() => switchMode('location')}>Location</button>
+        <button class="toggle-btn" class:active={mode === 'flight'} aria-pressed={mode === 'flight'} onclick={() => switchMode('flight')}>Flight</button>
     </nav>
 
     {#if mode === 'location'}
@@ -174,29 +237,43 @@
             {/each}
         </div>
         <RatingPrompt />
+        <!-- The search stays mounted (just hidden) so "New search" returns to what was typed. -->
+        <div class="panel" hidden={isLoading || !!predictionData}>
+            <LocationInput {onLocationSuccess} />
+        </div>
         {#if isLoading}
-            <div class="loader" aria-live="polite">Loading prediction…</div>
+            <div class="loader" aria-hidden="true">Loading prediction…</div>
         {:else if predictionData}
             <ResultsDisplay prediction={predictionData} {locationLabel} />
             {#if location}
                 <PushSubscribeButton location={{ latitude: location.latitude, longitude: location.longitude, label: locationLabel }} event={selectedEvent} />
             {/if}
-        {:else}
-            <LocationInput {onLocationSuccess} {onLocationError} />
+            <button class="secondary-btn" type="button" onclick={newSearch}>← New search</button>
         {/if}
     {:else}
-        {#if isFlightLoading}
-            <div class="loader" aria-live="polite">Analyzing flight route…</div>
-        {:else if flightPrediction}
-            <FlightResultsDisplay prediction={flightPrediction} onBack={() => (flightPrediction = null)} />
-        {:else}
+        <!-- Kept mounted while results show, so Back and errors keep the entered flight. -->
+        <div class="panel" hidden={isFlightLoading || !!flightPrediction}>
             <FlightInput lookupAvailable={data.flightLookupAvailable} {onFlightSubmit} onSwitchMode={() => switchMode('location')} />
+        </div>
+        {#if isFlightLoading}
+            <div class="loader" aria-hidden="true">Analyzing flight route…</div>
+        {:else if flightPrediction}
+            <FlightResultsDisplay prediction={flightPrediction} onBack={flightBack} />
         {/if}
     {/if}
 
-    {#if errorMessage}
-        <p class="error" aria-live="polite">{errorMessage}</p>
-    {/if}
+    <!-- Always mounted so changes are announced. -->
+    <p class="visually-hidden" role="status">{statusMessage}</p>
+    <div class="alert-region" role="alert">
+        {#if errorMessage}
+            <div class="error-panel">
+                <p class="error-text">{errorMessage}</p>
+                {#if retryAction}
+                    <button type="button" onclick={() => retryAction?.()}>Try again</button>
+                {/if}
+            </div>
+        {/if}
+    </div>
 </main>
 
 <style>
@@ -212,32 +289,52 @@
     }
     .header { text-align: center; }
     h1 { margin: 0; font-size: 2rem; }
-    .tagline { margin: 0.25rem 0 0; opacity: 0.9; }
+    .tagline { margin: 0.25rem 0 0; }
+    /* Segmented control: the selected option is a filled pill in the text color. */
     .mode-toggle {
         display: flex;
-        gap: 0;
-        border-radius: 10px;
-        overflow: hidden;
-        border: 1px solid rgba(255,255,255,0.18);
+        gap: 0.25rem;
+        padding: 0.25rem;
+        border-radius: 999px;
+        background: var(--surface);
+        border: 1px solid var(--border);
     }
     .toggle-btn {
-        padding: 0.5rem 1.25rem;
+        padding: 0.45rem 1.25rem;
         background: transparent;
         border: none;
+        border-radius: 999px;
         color: var(--text-primary);
         cursor: pointer;
         font-size: 0.95rem;
-        opacity: 0.6;
-        transition: opacity 0.2s, background 0.2s;
+        backdrop-filter: none;
+        transition: background 0.2s, color 0.2s;
     }
     .toggle-btn.active {
-        opacity: 1;
-        background: rgba(255,255,255,0.12);
+        background: var(--text-primary);
+        color: var(--background-start);
         font-weight: 600;
     }
-    .toggle-btn:hover { opacity: 0.9; }
+    .toggle-btn:hover { transform: none; }
+    .toggle-btn:not(.active):hover { background: var(--surface); }
     .event-toggle { margin-top: -0.75rem; }
-    .event-toggle .toggle-btn { font-size: 0.85rem; padding: 0.35rem 1rem; }
+    .event-toggle .toggle-btn { font-size: 0.85rem; padding: 0.3rem 1rem; }
+    .panel { width: 100%; max-width: 640px; display: flex; justify-content: center; }
+    .panel[hidden] { display: none; }
     .loader { opacity: 0.9; }
-    .error { color: #ffd3d3; }
+    .secondary-btn { background: transparent; }
+    .alert-region { width: 100%; max-width: 640px; }
+    .error-panel {
+        width: 100%;
+        max-width: 640px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        padding: 0.75rem 1rem;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+    }
+    .error-panel p { margin: 0; }
 </style>

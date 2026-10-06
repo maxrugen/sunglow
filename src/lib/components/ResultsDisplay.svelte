@@ -104,7 +104,7 @@
 </script>
 
 <section class="card">
-    <h2>
+    <h2 id="result-heading" tabindex="-1">
         {isTomorrow ? `Tomorrow's ${copy.title}` : `${copy.title} Quality`}: <span class="accent">{score}%</span>
         <small class="badge">{description}</small>
     </h2>
@@ -152,28 +152,17 @@
 </section>
 
 <style>
-    .card {
-        width: 100%;
-        max-width: 640px;
-        padding: 1.25rem 1.25rem 1rem;
-        border-radius: 16px;
-        background: rgba(0,0,0,0.18);
-        border: 1px solid rgba(255,255,255,0.18);
-        box-shadow: 0 10px 30px rgba(0,0,0,0.25);
-        backdrop-filter: blur(12px);
-        color: var(--text-primary);
-    }
     h2 { margin: 0 0 1rem; font-weight: 700; display: flex; align-items: center; gap: 0.5rem; }
     .accent { color: var(--text-accent); }
-    .badge { font-size: 0.9rem; padding: 0.25rem 0.5rem; border-radius: 999px; border: 1px solid currentColor; opacity: 0.9; }
+    .badge { font-size: 0.9rem; padding: 0.25rem 0.5rem; border-radius: 999px; border: 1px solid currentColor; }
     .metrics { display: grid; gap: 0.75rem; }
     .row { display: flex; align-items: center; justify-content: space-between; }
-    .location { margin: 0 0 0.5rem; opacity: 0.9; font-weight: 700; }
-    .day-note { margin: 0 0 0.5rem; font-size: 0.85rem; opacity: 0.8; }
+    .location { margin: 0 0 0.5rem; font-weight: 700; }
+    .day-note { margin: 0 0 0.5rem; font-size: 0.85rem; }
     .row strong { font-weight: 600; }
-    .explain { margin-top: 1rem; opacity: 0.95; }
+    .explain { margin-top: 1rem; }
     .explain h3 { margin: 0 0 0.5rem; font-size: 1rem; }
-    .used { margin: 0.5rem 0 0; font-size: 0.9rem; opacity: 0.9; }
+    .used { margin: 0.5rem 0 0; font-size: 0.9rem; }
 </style>
 
 

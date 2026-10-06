@@ -230,15 +230,15 @@
     .push-btn {
         padding: 0.6rem 1.1rem;
         border-radius: 10px;
-        border: 1px solid rgba(255, 255, 255, 0.25);
-        background: rgba(255, 255, 255, 0.12);
+        border: 1px solid var(--border);
+        background: var(--surface);
         color: var(--text-primary);
         cursor: pointer;
         font-size: 0.95rem;
         transition: background 0.2s, opacity 0.2s;
     }
     .push-btn:hover:not(:disabled) {
-        background: rgba(255, 255, 255, 0.2);
+        filter: brightness(1.15);
     }
     .push-btn:disabled {
         opacity: 0.6;
@@ -257,7 +257,6 @@
         width: 100%;
         text-align: center;
         font-size: 0.85rem;
-        opacity: 0.85;
         margin-bottom: 0.35rem;
     }
     .push-events label {
@@ -272,6 +271,5 @@
         max-width: 32ch;
         text-align: center;
         font-size: 0.85rem;
-        opacity: 0.85;
     }
 </style>
