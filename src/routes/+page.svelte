@@ -131,9 +131,8 @@
             if (!res.ok) throw new Error(await errorMessageFrom(res, 'Flight prediction request failed'));
 
             flightPrediction = await res.json();
-            if (flightPrediction?.qualityScore != null) {
-                applyScoreTheme(flightPrediction.qualityScore);
-            }
+            const scores = (flightPrediction?.sightings ?? []).map((s) => s.qualityScore).filter((v): v is number => v != null);
+            if (scores.length) applyScoreTheme(Math.max(...scores));
         } catch (err) {
             errorMessage = err instanceof Error ? err.message : 'An unexpected error occurred.';
         } finally {
@@ -160,7 +159,7 @@
 <main class="shell">
     <header class="header">
         <h1>Sunglow</h1>
-        <p class="tagline">{mode === 'location' ? EVENT_COPY[selectedEvent].tagline : 'Will you see a sunset on your flight?'}</p>
+        <p class="tagline">{mode === 'location' ? EVENT_COPY[selectedEvent].tagline : 'Will you see a sunrise or sunset on your flight?'}</p>
     </header>
 
     <nav class="mode-toggle" aria-label="Prediction mode">

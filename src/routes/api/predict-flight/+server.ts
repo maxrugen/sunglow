@@ -3,8 +3,8 @@ import SunCalc from 'suncalc';
 import { evaluateInFlight } from '$lib/server/scoring';
 import {
   interpolateGreatCircle,
-  findSunsetWindows,
-  bestSunsetWaypoint,
+  findEventWindows,
+  bestWaypointPerSighting,
   computeSunSide
 } from '$lib/server/flight-route';
 import { airQualityAt, compositeAt, fetchAirQuality, fetchForecast, nearestIndex } from '$lib/server/weather';
@@ -12,7 +12,7 @@ import { resolveFlightTimes, timeZoneAt } from '$lib/server/flight-time';
 import { airportByIata } from '$lib/server/airports';
 import type { WeatherData } from '$lib/server/scoring';
 import type { RequestHandler } from './$types';
-import type { FlightPredictionResponse, SunsetWaypoint } from '$lib/types';
+import type { EventWaypoint, FlightPredictionResponse, FlightSighting } from '$lib/types';
 
 // In-memory cache
 const cache = new Map<string, { ts: number; payload: FlightPredictionResponse }>();
@@ -68,6 +68,42 @@ async function fetchWeatherAtPoint(lat: number, lon: number, targetEpochMs: numb
     windSpeed10mMs: c.windMs,
     visibilityM: c.visibilityM,
     dewPointSpreadC: c.dewSpread,
+  };
+}
+
+/** Score one sighting with the weather at its waypoint and pick the window side. */
+async function toSighting(wp: EventWaypoint): Promise<FlightSighting> {
+  const weather = await fetchWeatherAtPoint(wp.lat, wp.lon, wp.eventTime);
+  let qualityScore: number | undefined;
+  let confidence: number | undefined;
+  let explanation: FlightSighting['explanation'] = {};
+  if (weather) {
+    const result = evaluateInFlight(weather, wp.offsetMinutes <= 30);
+    const leadDays = (wp.eventTime - Date.now()) / DAY_MS;
+    const leadPenalty = Math.min(30, Math.max(0, Math.round((leadDays - RELIABLE_LEAD_DAYS) * 5)));
+    qualityScore = result.score;
+    confidence = Math.max(0, result.confidence - leadPenalty);
+    explanation = { factors: result.details };
+  }
+
+  const seatSide = computeSunSide(wp.planeHeading, wp.sunAzimuth);
+  const seatRecommendation =
+    seatSide === 'either'
+      ? `The sun is roughly ${Math.abs(((wp.sunAzimuth - wp.planeHeading + 540) % 360) - 180) < 90 ? 'ahead of' : 'behind'} the plane at ${wp.event}, so either side works.`
+      : `Sit on the ${seatSide} side of the plane for the best ${wp.event} view.`;
+  const latDir = wp.lat >= 0 ? 'N' : 'S';
+  const lonDir = wp.lon >= 0 ? 'E' : 'W';
+
+  return {
+    event: wp.event,
+    qualityScore,
+    confidence,
+    explanation,
+    seatSide,
+    seatRecommendation,
+    timeUTC: new Date(wp.eventTime).toISOString(),
+    location: `${Math.abs(wp.lat).toFixed(1)}°${latDir}, ${Math.abs(wp.lon).toFixed(1)}°${lonDir}`,
+    waypoint: wp,
   };
 }
 
@@ -129,83 +165,23 @@ export const POST: RequestHandler = async ({ request }) => {
       15 // 15-minute intervals
     );
 
-    // Find sunset windows
-    const sunsetWaypoints = findSunsetWindows(waypoints, 60);
-
-    if (sunsetWaypoints.length === 0) {
-      const payload: FlightPredictionResponse = {
-        sunsetDuringFlight: false,
-        message: 'No sunset occurs during this flight. The sun either sets before departure, after arrival, or doesn\'t set at these latitudes on this date.',
-        route: {
-          departure: { iata: depIata, name: depAirport.name, lat: depAirport.lat, lon: depAirport.lon },
-          arrival: { iata: arrIata, name: arrAirport.name, lat: arrAirport.lat, lon: arrAirport.lon },
-          departureTime: new Date(depTimeMs).toISOString(),
-          arrivalTime: new Date(arrTimeMs).toISOString(),
-        }
-      };
-      cache.set(cacheKey, { ts: Date.now(), payload });
-      return json(payload, { headers: { 'Cache-Control': 'public, max-age=120' } });
-    }
-
-    // Pick the best sunset waypoint (closest to actual sunset time)
-    const best = bestSunsetWaypoint(sunsetWaypoints)!;
-
-    // Fetch weather for the best waypoint
-    const weather = await fetchWeatherAtPoint(best.lat, best.lon, best.sunsetTime);
-
-    let qualityScore: number | undefined;
-    let confidence: number | undefined;
-    let explanation: { factors?: Record<string, unknown> } = {};
-
-    if (weather) {
-      const alignedToSunset = best.offsetMinutes <= 30;
-      const result = evaluateInFlight(weather, alignedToSunset);
-      const leadDays = (best.sunsetTime - Date.now()) / DAY_MS;
-      const leadPenalty = Math.min(30, Math.max(0, Math.round((leadDays - RELIABLE_LEAD_DAYS) * 5)));
-      qualityScore = result.score;
-      confidence = Math.max(0, result.confidence - leadPenalty);
-      explanation = { factors: result.details };
-    }
-
-    // Compute seat side
-    const seatSide = computeSunSide(best.planeHeading, best.sunAzimuth);
-    const seatRecommendation = seatSide === 'left'
-      ? 'Sit on the left side of the plane for the best sunset view.'
-      : 'Sit on the right side of the plane for the best sunset view.';
-
-    // Format sunset time
-    const sunsetDate = new Date(best.sunsetTime);
-    const sunsetTimeUTC = sunsetDate.toISOString();
-
-    // Sunset location description
-    const latDir = best.lat >= 0 ? 'N' : 'S';
-    const lonDir = best.lon >= 0 ? 'E' : 'W';
-    const sunsetLocation = `${Math.abs(best.lat).toFixed(1)}°${latDir}, ${Math.abs(best.lon).toFixed(1)}°${lonDir}`;
-
-    // Score all sunset waypoints (for advanced display)
-    const scoredWaypoints: Array<SunsetWaypoint & { score?: number }> = sunsetWaypoints.map(wp => ({
-      ...wp,
-      score: wp === best ? qualityScore : undefined // only the best one is scored
-    }));
-
-    const payload: FlightPredictionResponse = {
-      sunsetDuringFlight: true,
-      qualityScore,
-      confidence,
-      explanation,
-      seatSide,
-      seatRecommendation,
-      sunsetWaypoint: best,
-      sunsetTimeUTC,
-      sunsetLocation,
-      scoredWaypoints,
-      route: {
-        departure: { iata: depIata, name: depAirport.name, lat: depAirport.lat, lon: depAirport.lon },
-        arrival: { iata: arrIata, name: arrAirport.name, lat: arrAirport.lat, lon: arrAirport.lon },
-        departureTime: new Date(depTimeMs).toISOString(),
-        arrivalTime: new Date(arrTimeMs).toISOString(),
-      }
+    const route: FlightPredictionResponse['route'] = {
+      departure: { iata: depIata, name: depAirport.name, lat: depAirport.lat, lon: depAirport.lon },
+      arrival: { iata: arrIata, name: arrAirport.name, lat: arrAirport.lat, lon: arrAirport.lon },
+      departureTime: new Date(depTimeMs).toISOString(),
+      arrivalTime: new Date(arrTimeMs).toISOString(),
     };
+
+    const best = bestWaypointPerSighting(findEventWindows(waypoints, 60));
+    const sightings = await Promise.all(best.map(toSighting));
+    const payload: FlightPredictionResponse = sightings.length
+      ? { sightings, route }
+      : {
+          sightings,
+          route,
+          message:
+            "No sunrise or sunset happens during this flight. The sun is either up or down the whole time, or doesn't rise or set at these latitudes on this date.",
+        };
 
     cache.set(cacheKey, { ts: Date.now(), payload });
     return json(payload, { headers: { 'Cache-Control': 'public, max-age=120' } });

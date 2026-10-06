@@ -23,18 +23,18 @@ Sunglow is a SvelteKit app (Svelte 5, runes) that predicts sunset and sunrise qu
 ### Location prediction
 
 1. `LocationInput.svelte` (city search via `/api/geocode`, or geolocation) → `+page.svelte` POSTs coordinates plus `event` (`'sunset' | 'sunrise'`, from the Sunset/Sunrise switch) to `/api/predict`.
-2. `predictEvent()` in `src/lib/server/prediction.ts` (`predictSunset()` is a thin wrapper):
+2. `predictEvent()` in `src/lib/server/prediction.ts`:
    - `nextEvent()` picks the next sunrise/sunset that isn't over yet (grace: 30 min after sunset, 15 min after sunrise). It checks SunCalc for yesterday/today/tomorrow because SunCalc's "nearest solar day" can return a passed event after local midnight or at high latitudes. `day` compares **local dates** (zone via `timeZoneAt()`), so 01:00 gives "this morning's sunrise".
    - Fetches the hourly forecast and air quality (AOD, PM2.5) via `src/lib/server/weather.ts`, plus cloud cover 50/150/300 km toward the sun at the event via `src/lib/server/horizon.ts` (one multi-point request), all in parallel.
    - Selects the hour nearest the event, builds a weighted composite, scores it with `evaluate()` (same model for both events).
-   - Returns `event`, score, confidence, factor details, `day`, and `timings.eventEpochSec` / `goldenHourEpochSec` (golden hour start for sunset, end for sunrise). `timings.sunsetEpochSec` is deprecated, kept for old clients.
+   - Returns `event`, score, confidence, factor details, `day`, and `timings.eventEpochSec` / `goldenHourEpochSec` (golden hour start for sunset, end for sunrise).
    - Cached in memory by (rounded lat/lon, event, event hour), checked before any upstream call.
 3. Deep links `/?lat=&lon=&label=&event=` are rendered by `+page.server.ts`, which calls `predictEvent()` directly.
 4. User-facing per-event wording lives in `src/lib/events.ts` (`EVENT_COPY`); don't hard-code "sunset" in components.
 
 ### Flight prediction
 
-`/api/predict-flight`: resolves times (`flight-time.ts`), interpolates the great-circle route and finds waypoints near local sunset (`flight-route.ts`), fetches weather at the best waypoint, scores with `evaluateInFlight()`, and picks the seat side from sun azimuth vs. heading. Airports come from `src/lib/server/airports.ts` (server-only; the client searches via `/api/airports?q=`).
+`/api/predict-flight`: resolves times (`flight-time.ts`), interpolates the great-circle route, finds waypoints within 60 min of a local sunrise or sunset and groups consecutive ones into sightings (`findEventWindows()` / `bestWaypointPerSighting()` in `flight-route.ts`), then scores each sighting's best waypoint with `evaluateInFlight()` and picks the seat side from sun azimuth vs. heading (`'either'` within 20° of nose or tail). Responds with `sightings[]` in time order. Airports come from `src/lib/server/airports.ts` (server-only; the client searches via `/api/airports?q=`).
 
 ### Push alerts
 
@@ -68,5 +68,5 @@ Generate with `npm run db:generate`; apply each new `drizzle/000N_*.sql` to Neon
 - AOD is only available from the air-quality API, not the forecast API.
 - Flight times without an offset are wall-clock times local to each airport. The zone comes from coordinates (`@photostructure/tz-lookup`) because `airports.json` has no zone data. The arrival date is resolved as the first matching local time after departure (flights < 24 h).
 - Flight weather is only available up to 16 days ahead; beyond that the response has no score but still has the seat side.
-- `predictSunset()` is shared by the API route, the deep-link load and the cron, so changes affect alerts too.
+- `predictEvent()` is shared by the API route, the deep-link load and the cron, so changes affect alerts too.
 - The low-cloud multiplier (ground model) scales the cloud score *and* every positive adjustment: if the sun can't get through, nothing else can add color. Penalties are not scaled.

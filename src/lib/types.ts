@@ -11,7 +11,7 @@ export type PredictionSummary = {
   confidence?: number;
   explanation?: { factors?: Record<string, unknown> };
   day?: 'today' | 'tomorrow';
-  timings?: { eventEpochSec?: number | null; sunsetEpochSec?: number | null; goldenHourEpochSec: number | null };
+  timings?: { eventEpochSec: number | null; goldenHourEpochSec: number | null };
   used?: { epochSec?: number; latitude?: number; longitude?: number; utcOffsetSeconds?: number };
   /** Signed snapshot for a later "How was it?" rating; absent when ratings are off. */
   ratingToken?: string;
@@ -38,7 +38,7 @@ export function toClientPrediction(p: PredictionSummary): ClientPrediction {
     explanation: p.explanation,
     day: p.day ?? 'today',
     timings: {
-      event: toDate(p.timings?.eventEpochSec ?? p.timings?.sunsetEpochSec),
+      event: toDate(p.timings?.eventEpochSec),
       goldenHour: toDate(p.timings?.goldenHourEpochSec),
     },
     used: p.used,
@@ -64,36 +64,41 @@ export type FlightWaypoint = {
   time: number;
 };
 
-export type SunsetWaypoint = FlightWaypoint & {
-  /** Local sunset time (ms) at this waypoint's position */
-  sunsetTime: number;
-  /** Minutes between the plane being at this point and local sunset */
+export type EventWaypoint = FlightWaypoint & {
+  event: SkyEvent;
+  /** Local sunrise/sunset time (ms) at this waypoint's position */
+  eventTime: number;
+  /** Minutes between the plane being at this point and the local event */
   offsetMinutes: number;
-  /** Sun azimuth in degrees at sunset */
+  /** Sun azimuth in degrees at the event */
   sunAzimuth: number;
   /** Plane heading in degrees at this waypoint */
   planeHeading: number;
 };
 
-export type FlightPredictionResponse = {
-  sunsetDuringFlight: boolean;
-  /** Overall sunset quality score (0-100), only present if sunset occurs */
+/** Which window faces the sun; 'either' when it's roughly ahead of or behind the plane. */
+export type SeatSide = 'left' | 'right' | 'either';
+
+/** One sunrise or sunset seen from the plane. */
+export type FlightSighting = {
+  event: SkyEvent;
+  /** Quality score (0-100); absent when no forecast covers the date yet */
   qualityScore?: number;
   confidence?: number;
   explanation?: { factors?: Record<string, unknown> };
-  /** Which side of the plane to sit on: 'left' | 'right' */
-  seatSide?: 'left' | 'right';
-  /** Human-readable seat recommendation */
-  seatRecommendation?: string;
-  /** The best sunset waypoint along the route */
-  sunsetWaypoint?: SunsetWaypoint;
-  /** UTC time string of sunset during flight */
-  sunsetTimeUTC?: string;
-  /** Description of where sunset occurs (lat/lon label) */
-  sunsetLocation?: string;
-  /** All sunset waypoints; only the best one carries a score */
-  scoredWaypoints?: Array<SunsetWaypoint & { score?: number }>;
-  /** Message when no sunset is expected */
+  seatSide: SeatSide;
+  seatRecommendation: string;
+  /** UTC time of the event at the best waypoint */
+  timeUTC: string;
+  /** Where the plane is at the time (lat/lon label) */
+  location: string;
+  waypoint: EventWaypoint;
+};
+
+export type FlightPredictionResponse = {
+  /** Sunrises and sunsets during the flight, in time order */
+  sightings: FlightSighting[];
+  /** Message when there are none */
   message?: string;
   /** Flight route summary */
   route?: {
@@ -103,5 +108,3 @@ export type FlightPredictionResponse = {
     arrivalTime: string;
   };
 };
-
-

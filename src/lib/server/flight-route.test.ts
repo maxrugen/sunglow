@@ -2,11 +2,11 @@ import { describe, it, expect } from 'vitest';
 import {
   bearing,
   interpolateGreatCircle,
-  findSunsetWindows,
+  findEventWindows,
   computeSunSide,
-  bestSunsetWaypoint,
+  bestWaypointPerSighting,
 } from './flight-route';
-import type { SunsetWaypoint } from '$lib/types';
+import type { EventWaypoint } from '$lib/types';
 
 describe('bearing()', () => {
   it('returns ~0° for due north', () => {
@@ -95,40 +95,44 @@ describe('interpolateGreatCircle()', () => {
   });
 });
 
-describe('findSunsetWindows()', () => {
-  it('returns empty for a morning flight', () => {
+describe('findEventWindows()', () => {
+  it('finds nothing for a mid-morning flight', () => {
+    // MUC→DRS 06:00–09:00Z in April: sunrise (~04:30Z) is well before departure.
     const depTime = Date.parse('2026-04-12T06:00:00Z');
     const arrTime = Date.parse('2026-04-12T09:00:00Z');
     const wps = interpolateGreatCircle(48.35, 11.79, 51.13, 13.77, depTime, arrTime, 15);
-    const windows = findSunsetWindows(wps, 60);
-    expect(windows.length).toBe(0);
+    expect(findEventWindows(wps, 60)).toEqual([]);
   });
 
-  it('returns waypoints for an evening flight around sunset', () => {
+  it('returns sunset waypoints for an evening flight', () => {
     // MUC→DRS around local sunset in April (approx 18:00 UTC)
     const depTime = Date.parse('2026-04-12T17:30:00Z');
     const arrTime = Date.parse('2026-04-12T19:30:00Z');
     const wps = interpolateGreatCircle(48.35, 11.79, 51.13, 13.77, depTime, arrTime, 15);
-    const windows = findSunsetWindows(wps, 60);
+    const windows = findEventWindows(wps, 60);
     expect(windows.length).toBeGreaterThan(0);
-    windows.forEach(sw => {
-      expect(sw.offsetMinutes).toBeLessThanOrEqual(60);
-      expect(sw.sunAzimuth).toBeGreaterThanOrEqual(0);
-      expect(sw.sunAzimuth).toBeLessThan(360);
-      expect(sw.planeHeading).toBeGreaterThanOrEqual(0);
-      expect(sw.planeHeading).toBeLessThan(360);
+    windows.forEach((w) => {
+      expect(w.event).toBe('sunset');
+      expect(w.offsetMinutes).toBeLessThanOrEqual(60);
+      expect(w.sunAzimuth).toBeGreaterThanOrEqual(0);
+      expect(w.sunAzimuth).toBeLessThan(360);
+      expect(w.planeHeading).toBeGreaterThanOrEqual(0);
+      expect(w.planeHeading).toBeLessThan(360);
+      expect(new Date(w.eventTime).getUTCFullYear()).toBe(2026);
     });
   });
 
-  it('sunset waypoints have valid sunsetTime', () => {
-    const depTime = Date.parse('2026-04-12T17:30:00Z');
-    const arrTime = Date.parse('2026-04-12T19:30:00Z');
-    const wps = interpolateGreatCircle(48.35, 11.79, 51.13, 13.77, depTime, arrTime, 15);
-    const windows = findSunsetWindows(wps, 60);
-    windows.forEach(sw => {
-      expect(sw.sunsetTime).toBeGreaterThan(0);
-      expect(new Date(sw.sunsetTime).getFullYear()).toBe(2026);
-    });
+  it('finds the sunrise on an overnight JFK→LHR flight', () => {
+    // Departs 22:30Z (18:30 EDT), lands 05:30Z (06:30 BST).
+    const depTime = Date.parse('2026-06-10T22:30:00Z');
+    const arrTime = Date.parse('2026-06-11T05:30:00Z');
+    const wps = interpolateGreatCircle(40.64, -73.78, 51.47, -0.45, depTime, arrTime, 15);
+    const sightings = bestWaypointPerSighting(findEventWindows(wps, 60));
+    const sunrise = sightings.find((s) => s.event === 'sunrise');
+    expect(sunrise).toBeDefined();
+    // Eastbound into the sunrise: the sun is in the east-north-east.
+    expect(sunrise!.sunAzimuth).toBeGreaterThan(30);
+    expect(sunrise!.sunAzimuth).toBeLessThan(90);
   });
 });
 
@@ -143,17 +147,20 @@ describe('computeSunSide()', () => {
     expect(computeSunSide(0, 270)).toBe('left');
   });
 
-  it('sun directly ahead is right (edge case)', () => {
-    expect(computeSunSide(45, 45)).toBe('right');
+  it('either side when the sun is roughly ahead or behind', () => {
+    expect(computeSunSide(45, 45)).toBe('either');
+    expect(computeSunSide(0, 15)).toBe('either');
+    expect(computeSunSide(0, 350)).toBe('either');
+    expect(computeSunSide(45, 225)).toBe('either');
+    expect(computeSunSide(0, 165)).toBe('either');
   });
 
-  it('sun directly behind is right when relative=180', () => {
-    // relative = (225 - 45 + 360) % 360 = 180 → not > 180 → right
-    expect(computeSunSide(45, 225)).toBe('right');
+  it('picks a side just outside the ±20° band', () => {
+    expect(computeSunSide(0, 160)).toBe('right');
+    expect(computeSunSide(0, 200)).toBe('left');
   });
 
   it('JFK→LAX (westbound ~265°) at sunset (~290° azimuth) is right', () => {
-    // Sun slightly right of heading
     expect(computeSunSide(265, 290)).toBe('right');
   });
 
@@ -163,24 +170,37 @@ describe('computeSunSide()', () => {
   });
 
   it('handles wrap-around: heading 350°, sun at 10°', () => {
-    // relative = (10 - 350 + 360) % 360 = 20 → right
+    // relative = 20° → just outside the ahead band → right
     expect(computeSunSide(350, 10)).toBe('right');
   });
 });
 
-describe('bestSunsetWaypoint()', () => {
-  it('returns null for empty array', () => {
-    expect(bestSunsetWaypoint([])).toBeNull();
+describe('bestWaypointPerSighting()', () => {
+  const MIN = 60 * 1000;
+  const wp = (event: 'sunrise' | 'sunset', minutes: number, offsetMinutes: number): EventWaypoint => ({
+    lat: 50, lon: 10, time: minutes * MIN, event, eventTime: minutes * MIN, offsetMinutes, sunAzimuth: 280, planeHeading: 45,
   });
 
-  it('returns the waypoint closest to sunset', () => {
-    const wps: SunsetWaypoint[] = [
-      { lat: 50, lon: 10, time: 1000, sunsetTime: 1500, offsetMinutes: 30, sunAzimuth: 280, planeHeading: 45 },
-      { lat: 51, lon: 11, time: 1100, sunsetTime: 1500, offsetMinutes: 5, sunAzimuth: 281, planeHeading: 46 },
-      { lat: 52, lon: 12, time: 1200, sunsetTime: 1500, offsetMinutes: 20, sunAzimuth: 282, planeHeading: 47 },
-    ];
-    const best = bestSunsetWaypoint(wps);
-    expect(best?.offsetMinutes).toBe(5);
-    expect(best?.lat).toBe(51);
+  it('returns nothing for no windows', () => {
+    expect(bestWaypointPerSighting([])).toEqual([]);
+  });
+
+  it('keeps the waypoint closest to the event in each group', () => {
+    const best = bestWaypointPerSighting([wp('sunset', 0, 30), wp('sunset', 15, 5), wp('sunset', 30, 20)]);
+    expect(best).toHaveLength(1);
+    expect(best[0].offsetMinutes).toBe(5);
+  });
+
+  it('splits two sunsets on a very long flight into two sightings', () => {
+    const best = bestWaypointPerSighting([
+      wp('sunset', 0, 10), wp('sunset', 15, 3),
+      wp('sunset', 20 * 60, 8), wp('sunset', 20 * 60 + 15, 2),
+    ]);
+    expect(best.map((b) => b.offsetMinutes)).toEqual([3, 2]);
+  });
+
+  it('returns sunrise and sunset sightings in time order', () => {
+    const best = bestWaypointPerSighting([wp('sunset', 0, 4), wp('sunrise', 9 * 60, 6)]);
+    expect(best.map((b) => b.event)).toEqual(['sunset', 'sunrise']);
   });
 });
