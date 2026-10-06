@@ -41,6 +41,12 @@
         } else if (fx.lowCloud?.value > 60) {
             parts.push('Extensive low clouds likely blocked the sun near the horizon.');
         }
+        // Clouds toward the setting sun
+        if (fx.horizon?.net < 0) {
+            parts.push('Clouds toward the setting sun may block the light before it reaches the sky overhead.');
+        } else if (fx.horizon?.net > 0) {
+            parts.push('The sky toward the setting sun looks clear, so light can reach the clouds overhead.');
+        }
         // High clouds canvas
         if (fx.highCloud) {
             const hc = fx.highCloud.value;

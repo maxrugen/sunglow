@@ -40,8 +40,16 @@ function airQualityResponse() {
   };
 }
 
+// Horizon samples: 80% low cloud toward the sun.
+function horizonResponse() {
+  return [0, 1, 2].map(() => ({
+    hourly: { time: HOURS, cloudcover_low: HOURS.map(() => 80), cloudcover_mid: HOURS.map(() => 0) },
+  }));
+}
+
 const fetchMock = vi.fn(async (url: string) => {
-  const body = url.includes('air-quality') ? airQualityResponse() : forecastResponse();
+  const multiPoint = /latitude=[^&]*%2C/.test(url);
+  const body = url.includes('air-quality') ? airQualityResponse() : multiPoint ? horizonResponse() : forecastResponse();
   return new Response(JSON.stringify(body), { status: 200 });
 });
 
@@ -72,6 +80,13 @@ describe('predictSunset()', () => {
     expect(payload.weatherData.aod).toBeCloseTo(0.25);
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes('aerosol_optical_depth'))).toBe(true);
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes('daily=aerosol'))).toBe(false);
+  });
+
+  it('includes clouds toward the setting sun in the score', async () => {
+    const payload = await predictSunset({ latitude: 40.75, longitude: -74.0 });
+    expect(payload.weatherData.horizonCloud).toBeCloseTo(80);
+    expect(payload.weatherData.horizonAzimuthDeg).toBeGreaterThan(270);
+    expect((payload.explanation.factors.horizon as { net: number }).net).toBeLessThan(0);
   });
 
   it('serves repeat lookups from the cache without refetching', async () => {

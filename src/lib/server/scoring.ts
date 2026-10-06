@@ -13,6 +13,8 @@ export type WeatherData = {
   visibilityM?: number;
   dewPointSpreadC?: number;
   pm25UgM3?: number;
+  /** Share (0–100) of the path toward the setting sun blocked by low/mid cloud. */
+  horizonCloud?: number;
 };
 
 export type Evaluation = {
@@ -79,6 +81,17 @@ function solarAltitudeAdj(deg: number | undefined): number {
   return dist <= 5 ? Math.round(6 * (1 - dist / 5)) : 0;
 }
 
+/**
+ * Cloud toward the sun cuts off the light that colors clouds overhead. A clear
+ * path earns a small bonus; beyond 35% blocking the penalty grows to -25 at 85%.
+ */
+function horizonAdj(blockingPct: number | undefined): number {
+  if (typeof blockingPct !== 'number') return 0;
+  if (blockingPct < 15) return 4;
+  if (blockingPct <= 35) return 0;
+  return -Math.round(Math.min(1, (blockingPct - 35) / 50) * 25);
+}
+
 function clampScore(value: number): number {
   return Math.max(0, Math.min(100, Math.round(value)));
 }
@@ -103,7 +116,8 @@ export function calculateWithDetails(weatherData: WeatherData): {
     windSpeed10mMs,
     visibilityM,
     dewPointSpreadC,
-    pm25UgM3
+    pm25UgM3,
+    horizonCloud
   } = weatherData;
 
   const netHigh = highCloudNet(highCloud);
@@ -172,6 +186,9 @@ export function calculateWithDetails(weatherData: WeatherData): {
   const totalCloudAdj = typeof totalCloud === 'number' && totalCloud > 90 ? -5 : 0;
   score += totalCloudAdj;
 
+  const horizon = horizonAdj(horizonCloud);
+  score += horizon;
+
   return {
     score: clampScore(score),
     details: {
@@ -187,7 +204,8 @@ export function calculateWithDetails(weatherData: WeatherData): {
       pressureTrend: { hPa: pressureTrendHpa, net: pressure },
       totalCloud: { value: totalCloud, net: totalCloudAdj },
       pm25: { ugm3: pm25UgM3, net: pm25Adj },
-      solarAltitude: { deg: solarAltitudeDeg, net: solarAdj }
+      solarAltitude: { deg: solarAltitudeDeg, net: solarAdj },
+      horizon: { blockingPct: horizonCloud, net: horizon }
     }
   };
 }

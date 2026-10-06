@@ -25,7 +25,7 @@ Sunglow is a SvelteKit app (Svelte 5, runes) that predicts sunset quality for a 
 1. `LocationInput.svelte` (city search via `/api/geocode`, or geolocation) → `+page.svelte` POSTs coordinates to `/api/predict`.
 2. `predictSunset()` in `src/lib/server/prediction.ts`:
    - `upcomingSunset()` picks tonight's sunset, or tomorrow's once tonight's afterglow (30 min) has passed.
-   - Fetches the hourly forecast and air quality (AOD, PM2.5) in parallel via `src/lib/server/weather.ts`.
+   - Fetches the hourly forecast and air quality (AOD, PM2.5) via `src/lib/server/weather.ts`, plus cloud cover 50/150/300 km toward the setting sun via `src/lib/server/horizon.ts` (one multi-point request), all in parallel.
    - Selects the hour nearest sunset, builds a weighted composite, scores it with `evaluate()`.
    - Returns score, confidence, factor details, `day`, and sunset/golden-hour `timings` (the client doesn't run SunCalc).
    - Cached in memory by (rounded lat/lon, sunset hour), checked before any upstream call.
@@ -44,6 +44,7 @@ Sunglow is a SvelteKit app (Svelte 5, runes) that predicts sunset quality for a 
 ### Key files
 
 - `src/lib/server/scoring.ts` — `calculateWithDetails()`, `calculateConfidence()`, `evaluate()`, `evaluateInFlight()`; both models share factor helpers with their own coefficients. `WeatherData` lives here.
+- `src/lib/server/horizon.ts` — sunset azimuth, great-circle sample points, `horizonBlocking()` (low + 0.5 × mid cloud, weighted 0.25/0.4/0.35). Feeds `horizonCloud` into the ground model only; a failed fetch just leaves it out.
 - `src/lib/server/weather.ts` — Open-Meteo fetches, `nearestIndex()`, `compositeAt()` (weights `[0.3, 0.6, 0.1]` over `[idx-1, idx, idx+1]`), `fetchWithRetry()` (retries 5xx/429 only).
 - `src/lib/score.ts` — `scoreLabel()` and `applyScoreTheme()`: one set of score bands (80/65/40) for labels and page theme.
 - `src/lib/types.ts` — shared client types and `toClientPrediction()`.
