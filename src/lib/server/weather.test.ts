@@ -61,6 +61,18 @@ describe('airQualityAt()', () => {
   it('returns undefined values without data', () => {
     expect(airQualityAt(null, 0)).toEqual({ aod: undefined, pm25: undefined });
   });
+
+  it('ignores hours outside the forecast range instead of reusing the last one', () => {
+    const aq = { hourly: { time: [0, 3600], aerosol_optical_depth: [0.1, 0.3], pm2_5: [5, 15] } };
+    expect(airQualityAt(aq, 3600 + 2 * 3600)).toEqual({ aod: 0.3, pm25: 15 });
+    expect(airQualityAt(aq, 3600 + 3 * 3600)).toEqual({ aod: undefined, pm25: undefined });
+    expect(airQualityAt(aq, 5 * 24 * 3600)).toEqual({ aod: undefined, pm25: undefined });
+  });
+
+  it('treats null (no forecast for that hour) as missing, not as zero', () => {
+    const aq = { hourly: { time: [0], aerosol_optical_depth: [null], pm2_5: [8] } };
+    expect(airQualityAt(aq, 0)).toEqual({ aod: undefined, pm25: 8 });
+  });
 });
 
 describe('fetchForecast()', () => {

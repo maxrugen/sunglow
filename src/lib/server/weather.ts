@@ -27,8 +27,8 @@ export type Forecast = {
   daily?: { sunrise?: number[]; sunset?: number[] };
 };
 
-type AirQuality = {
-  hourly?: { time?: number[]; aerosol_optical_depth?: number[]; pm2_5?: number[] };
+export type AirQuality = {
+  hourly?: { time?: number[]; aerosol_optical_depth?: Array<number | null>; pm2_5?: Array<number | null> };
 };
 
 export type SurfaceComposite = {
@@ -132,13 +132,14 @@ export async function fetchForecast(
  * The forecast API has no AOD variable, so this is the only source for it.
  * Resolves to null on any failure, since both values are optional for scoring.
  */
-export async function fetchAirQuality(latitude: number, longitude: number): Promise<AirQuality | null> {
+export async function fetchAirQuality(latitude: number, longitude: number, forecastDays = 5): Promise<AirQuality | null> {
   try {
     const params = new URLSearchParams({
       latitude: String(latitude),
       longitude: String(longitude),
       hourly: 'aerosol_optical_depth,pm2_5',
-      forecast_days: '5',
+      // The air-quality API forecasts at most 7 days.
+      forecast_days: String(Math.min(7, forecastDays)),
       timeformat: 'unixtime',
     });
     const res = await fetchWithRetry(`https://air-quality-api.open-meteo.com/v1/air-quality?${params.toString()}`, {}, 1, 6000);
@@ -148,19 +149,20 @@ export async function fetchAirQuality(latitude: number, longitude: number): Prom
   }
 }
 
-/** AOD and PM2.5 at the hour nearest `targetSec` (UTC epoch seconds). */
+/** Air quality further than this from the wanted hour (e.g. beyond the forecast range) is ignored. */
+const AQ_MAX_GAP_SEC = 2 * 3600;
+
+/** AOD and PM2.5 at the hour nearest `targetSec` (UTC epoch seconds), if the data covers it. */
 export function airQualityAt(
   aq: AirQuality | null,
   targetSec: number
 ): { aod: number | undefined; pm25: number | undefined } {
-  const i = nearestIndex(aq?.hourly?.time ?? [], targetSec);
-  if (i < 0) return { aod: undefined, pm25: undefined };
-  const aod = Number(aq?.hourly?.aerosol_optical_depth?.[i]);
-  const pm25 = Number(aq?.hourly?.pm2_5?.[i]);
-  return {
-    aod: Number.isFinite(aod) ? aod : undefined,
-    pm25: Number.isFinite(pm25) ? pm25 : undefined,
-  };
+  const times = aq?.hourly?.time ?? [];
+  const i = nearestIndex(times, targetSec);
+  if (i < 0 || Math.abs(Number(times[i]) - targetSec) > AQ_MAX_GAP_SEC) return { aod: undefined, pm25: undefined };
+  // Missing hours come as null (AOD ends ~5 days out); Number(null) would make them 0.
+  const value = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
+  return { aod: value(aq?.hourly?.aerosol_optical_depth?.[i]), pm25: value(aq?.hourly?.pm2_5?.[i]) };
 }
 
 /** Number of hours for which every hourly variable has a value slot. */

@@ -1,6 +1,7 @@
 <script lang="ts">
     import LocationInput from '#lib/components/LocationInput.svelte';
     import ResultsDisplay from '#lib/components/ResultsDisplay.svelte';
+    import OutlookStrip from '#lib/components/OutlookStrip.svelte';
     import PushSubscribeButton from '#lib/components/PushSubscribeButton.svelte';
     import FlightInput from '#lib/components/FlightInput.svelte';
     import FlightResultsDisplay from '#lib/components/FlightResultsDisplay.svelte';
@@ -241,6 +242,7 @@
         {:else if predictionData}
             <ResultsDisplay prediction={predictionData} {locationLabel} />
             {#if location}
+                <OutlookStrip latitude={location.latitude} longitude={location.longitude} event={predictionData.event} />
                 <PushSubscribeButton location={{ latitude: location.latitude, longitude: location.longitude, label: locationLabel }} event={selectedEvent} />
             {/if}
             <button class="secondary-btn" type="button" onclick={newSearch}>← New search</button>

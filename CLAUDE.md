@@ -32,8 +32,9 @@ Sunglow is a SvelteKit 3 app (Svelte 5, runes, Vite 8) that predicts sunset and 
    - Selects the hour nearest the event, builds a weighted composite, scores it with `evaluate()` (same model for both events).
    - Returns `event`, score, confidence, factor details, `day`, and `timings.eventEpochSec` / `goldenHourEpochSec` (golden hour start for sunset, end for sunrise).
    - Coordinates are rounded to 2 decimals (`roundCoord()`) first; results are cached in memory by (lat/lon, event, event hour), checked before any upstream call.
-3. Deep links `/?lat=&lon=&label=&event=` are rendered by `+page.server.ts`, which calls `predictEvent()` directly.
-4. User-facing per-event wording lives in `src/lib/events.ts` (`EVENT_COPY`); don't hard-code "sunset" in components.
+3. Week outlook: `OutlookStrip.svelte` loads `/api/outlook?lat&lon&event` after the main result. `predictOutlook()` (`src/lib/server/outlook.ts`) scores the next 7 events from three requests (8-day forecast, air quality, `fetchHorizons()` with sample points per day) through `scoreEvent()`, the same function `predictEvent()` uses, so day 1 matches the single prediction. It returns the IANA `timeZone` so the client formats dates and times in the location's zone (DST-safe). Confidence keeps dropping beyond 48 h of lead time.
+4. Deep links `/?lat=&lon=&label=&event=` are rendered by `+page.server.ts`, which calls `predictEvent()` directly.
+5. User-facing per-event wording lives in `src/lib/events.ts` (`EVENT_COPY`); don't hard-code "sunset" in components.
 
 ### Flight prediction
 
@@ -75,6 +76,7 @@ Generate with `npm run db:generate`; apply each new `drizzle/000N_*.sql` to Neon
 
 ## Important quirks
 
+- Open-Meteo marks missing values with `null`; `Number(null)` is 0, so check `typeof v === 'number'` (horizon, air quality). Air-quality AOD ends ~5 days out; unknown AOD scores neutral.
 - Open-Meteo `timeformat=unixtime` values are **UTC epochs**. Compare them to UTC instants directly; never add `utc_offset_seconds` (only use it to format local wall-clock times).
 - AOD is only available from the air-quality API, not the forecast API.
 - Flight times without an offset are wall-clock times local to each airport. The zone comes from coordinates (`@photostructure/tz-lookup`) because `airports.json` has no zone data. The arrival date is resolved as the first matching local time after departure (flights < 24 h).

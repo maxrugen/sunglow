@@ -261,7 +261,8 @@ export function calculateWithDetails(weatherData: WeatherData): {
 
 /**
  * 0–100: how much to trust the score. `leadHours` is how far ahead the event
- * is; forecasts for tomorrow evening are less certain than for the next hour.
+ * is; forecasts for tomorrow evening are less certain than for the next hour,
+ * and next week's much less.
  */
 export function calculateConfidence(weatherData: WeatherData, alignedToEvent: boolean, leadHours = 0): number {
   let confidence = 90;
@@ -277,7 +278,10 @@ export function calculateConfidence(weatherData: WeatherData, alignedToEvent: bo
   if (vis !== undefined && vis < 5000) confidence -= 15;
   if (pm25 !== undefined && pm25 > 60) confidence -= 10;
   if (!alignedToEvent) confidence -= 10;
-  confidence -= Math.min(15, Math.floor(Math.max(0, leadHours) / 3));
+  const lead = Math.max(0, leadHours);
+  confidence -= Math.min(15, Math.floor(lead / 3));
+  // Beyond two days forecast skill keeps dropping (the week outlook): about -4 a day, -20 at most.
+  if (lead > 48) confidence -= Math.min(20, Math.floor((lead - 48) / 6));
 
   return clampScore(confidence);
 }

@@ -60,7 +60,9 @@ export function horizonBlocking(samples: Array<Pick<HorizonSample, 'km' | 'lowCl
   return weightSum > 0 ? total / weightSum : 0;
 }
 
-type CloudForecast = { hourly?: { time?: number[]; cloudcover_low?: number[]; cloudcover_mid?: number[] } };
+type CloudForecast = { hourly?: { time?: number[]; cloudcover_low?: Array<number | null>; cloudcover_mid?: Array<number | null> } };
+
+const DAY_MS = 24 * 3600 * 1000;
 
 /**
  * Cloud cover along the sun's direction at `eventTime` (sunrise or sunset), from a single multi-point
@@ -68,33 +70,56 @@ type CloudForecast = { hourly?: { time?: number[]; cloudcover_low?: number[]; cl
  * optional refinement to the score.
  */
 export async function fetchHorizon(lat: number, lon: number, eventTime: Date): Promise<Horizon | null> {
+  return (await fetchHorizons(lat, lon, [eventTime]))[0];
+}
+
+/**
+ * `fetchHorizon()` for several events (e.g. a week of sunsets) in one request.
+ * Each event gets its own sample points, since the sun's direction shifts by
+ * a few degrees a week. Null entries for events that couldn't be sampled.
+ */
+export async function fetchHorizons(lat: number, lon: number, eventTimes: Date[]): Promise<Array<Horizon | null>> {
+  const none = eventTimes.map(() => null);
+  if (eventTimes.length === 0) return none;
   try {
-    const azimuthDeg = sunAzimuth(eventTime, lat, lon);
-    const points = HORIZON_SAMPLES.map((s) => ({ km: s.km, ...destinationPoint(lat, lon, azimuthDeg, s.km) }));
+    const perEvent = eventTimes.map((time) => {
+      const azimuthDeg = sunAzimuth(time, lat, lon);
+      const points = HORIZON_SAMPLES.map((s) => ({ km: s.km, ...destinationPoint(lat, lon, azimuthDeg, s.km) }));
+      return { time, azimuthDeg, points };
+    });
+    const points = perEvent.flatMap((e) => e.points);
+    const latestMs = Math.max(...eventTimes.map((t) => t.getTime()));
+    // forecast_days counts from today's UTC midnight: one more than the full days until the last event.
+    const days = Math.min(16, Math.max(2, Math.ceil((latestMs - Date.now()) / DAY_MS) + 1));
     const params = new URLSearchParams({
       latitude: points.map((p) => p.lat.toFixed(4)).join(','),
       longitude: points.map((p) => p.lon.toFixed(4)).join(','),
       hourly: 'cloudcover_low,cloudcover_mid',
-      forecast_days: '2',
+      forecast_days: String(days),
       timeformat: 'unixtime',
     });
     const res = await fetchWithRetry(`https://api.open-meteo.com/v1/forecast?${params.toString()}`, {}, 1, 8000);
-    if (!res.ok) return null;
-    const body = (await res.json()) as CloudForecast[];
-    if (!Array.isArray(body) || body.length !== points.length) return null;
+    if (!res.ok) return none;
+    const raw = (await res.json()) as CloudForecast[] | CloudForecast;
+    // Open-Meteo answers a single location with an object, several with an array.
+    const body = Array.isArray(raw) ? raw : [raw];
+    if (body.length !== points.length) return none;
 
-    const targetSec = Math.floor(eventTime.getTime() / 1000);
-    const samples: HorizonSample[] = [];
-    for (let i = 0; i < points.length; i++) {
-      const hourly = body[i]?.hourly;
-      const idx = nearestIndex(hourly?.time ?? [], targetSec);
-      const low = Number(hourly?.cloudcover_low?.[idx]);
-      const mid = Number(hourly?.cloudcover_mid?.[idx]);
-      if (idx < 0 || !Number.isFinite(low) || !Number.isFinite(mid)) return null;
-      samples.push({ ...points[i], lowCloud: low, midCloud: mid });
-    }
-    return { azimuthDeg, blockingPct: horizonBlocking(samples), samples };
+    return perEvent.map(({ time, azimuthDeg, points: eventPoints }, k) => {
+      const targetSec = Math.floor(time.getTime() / 1000);
+      const samples: HorizonSample[] = [];
+      for (let i = 0; i < eventPoints.length; i++) {
+        const hourly = body[k * HORIZON_SAMPLES.length + i]?.hourly;
+        const idx = nearestIndex(hourly?.time ?? [], targetSec);
+        // Open-Meteo marks missing values with null, which Number() would turn into a clear 0 %.
+        const low = hourly?.cloudcover_low?.[idx];
+        const mid = hourly?.cloudcover_mid?.[idx];
+        if (idx < 0 || typeof low !== 'number' || typeof mid !== 'number') return null;
+        samples.push({ ...eventPoints[i], lowCloud: low, midCloud: mid });
+      }
+      return { azimuthDeg, blockingPct: horizonBlocking(samples), samples };
+    });
   } catch {
-    return null;
+    return none;
   }
 }
