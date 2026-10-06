@@ -1,6 +1,7 @@
 import SunCalc from 'suncalc';
 import { evaluate, type WeatherData } from '$lib/server/scoring';
 import { airQualityAt, compositeAt, fetchAirQuality, fetchForecast, hourCount, nearestIndex } from '$lib/server/weather';
+import { fetchHorizon } from '$lib/server/horizon';
 
 export type PredictionPayload = {
   qualityScore: number;
@@ -8,6 +9,8 @@ export type PredictionPayload = {
     pressureMslHpa: number;
     temperature2mC: number;
     dewPointC: number;
+    /** Compass bearing toward the setting sun, when the horizon was sampled. */
+    horizonAzimuthDeg?: number;
     selectedHourIndex: number;
     selectedHour: number | undefined;
   };
@@ -103,10 +106,11 @@ export async function predictSunset({
     return cached.payload;
   }
 
-  const [forecast, aq] = await Promise.all([
+  const [forecast, aq, horizon] = await Promise.all([
     // Two days so tomorrow's sunset is covered once tonight's has passed.
     fetchForecast(latitude, longitude, 2, { daily: 'sunset' }),
     fetchAirQuality(latitude, longitude),
+    upcoming.sunset ? fetchHorizon(latitude, longitude, upcoming.sunset) : Promise.resolve(null),
   ]);
   if (!forecast) {
     throw new PredictionError('Failed to fetch weather data', 502);
@@ -160,6 +164,8 @@ export async function predictSunset({
     dewPointC: c.dewPointC,
     dewPointSpreadC: c.dewSpread,
     pm25UgM3: hazeRelevant ? airQuality.pm25 : undefined,
+    horizonCloud: horizon?.blockingPct,
+    horizonAzimuthDeg: horizon?.azimuthDeg,
     selectedHourIndex: idx,
     selectedHour: times[idx],
   };

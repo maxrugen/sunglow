@@ -76,7 +76,7 @@ npm run test:watch # watch mode
 1) User enters a city or uses "Use My Location".
 2) The app reverse geocodes to a label if needed, then POSTs coordinates to the prediction API.
 3) The server:
-   - Fetches hourly weather and air quality (AOD, PM2.5) from Open‑Meteo in parallel
+   - Fetches hourly weather, air quality (AOD, PM2.5) and cloud cover along the sunset direction from Open‑Meteo in parallel
    - Picks the hour closest to the actual sunset (all timestamps are UTC epochs)
    - Computes score and confidence using `evaluate` in `src/lib/server/scoring.ts`
    - Caches the response in memory keyed by `(lat,lon,date,hour)`
@@ -106,6 +106,7 @@ Core logic lives in:
   - Precipitation penalties
   - Aerosol/PM2.5 bonus within sensible humidity/visibility ranges
   - Solar altitude band weighting (peak around −3°, effective in [−8°, +2°])
+  - Horizon toward the sun: low cloud (plus half of mid cloud) sampled 50/150/300 km along the sunset azimuth (`src/lib/server/horizon.ts`). A clear path gives +4; blocking above 35% costs up to −25. Ground model only.
 - `calculateConfidence(weatherData, alignedToSunset)` factors POP/precip, low clouds, visibility, particulates, and whether data was aligned to the real sunset
 - `evaluateInFlight(weatherData, alignedToSunset)` adapts the model for cruise altitude (~10 km):
   - Low clouds are inverted to a bonus (cloud‑top canvas)
@@ -255,6 +256,7 @@ src/
       weather.ts                   # Open-Meteo fetches, hour selection, weighted composites
       prediction.ts                # location prediction (shared by API, deep links, cron)
       airports.ts                  # airport lookup + search
+      horizon.ts                   # cloud sampling toward the setting sun
       flight-route.ts              # great-circle interpolation, sunset windows, seat side
       flight-time.ts               # airport-local times -> UTC
       webpush.ts, push-auth.ts     # Web Push sending + subscribe gate

@@ -227,3 +227,32 @@ describe('evaluateInFlight()', () => {
     expect(terrible.score).toBeLessThanOrEqual(100);
   });
 });
+
+describe('horizon factor', () => {
+  it('has no effect without horizon data', () => {
+    const { details } = calculateWithDetails(baseWeather());
+    expect((details.horizon as { net: number }).net).toBe(0);
+  });
+
+  it('gives a small bonus for a clear path toward the sun', () => {
+    const clear = calculateWithDetails(baseWeather({ horizonCloud: 5 }));
+    expect((clear.details.horizon as { net: number }).net).toBe(4);
+  });
+
+  it('penalises a blocked horizon, up to -25', () => {
+    const net = (horizonCloud: number) =>
+      (calculateWithDetails(baseWeather({ horizonCloud })).details.horizon as { net: number }).net;
+    expect(net(30)).toBe(0);
+    expect(net(60)).toBe(-13);
+    expect(net(100)).toBe(-25);
+    // Visible in the score when it isn't clamped at 100.
+    const mixed = baseWeather({ highCloud: 20, midCloud: 10 });
+    expect(calculateWithDetails({ ...mixed, horizonCloud: 90 }).score).toBeLessThan(calculateWithDetails(mixed).score);
+  });
+
+  it('does not affect the in-flight model', () => {
+    const a = evaluateInFlight(baseWeather({ horizonCloud: 100 }), true).score;
+    const b = evaluateInFlight(baseWeather(), true).score;
+    expect(a).toBe(b);
+  });
+});
