@@ -1,0 +1,654 @@
+{
+ "request": {
+  "params": {
+   "dep_iata": "JFK",
+   "arr_iata": "LAX",
+   "airline_iata": "DL",
+   "lang": "en"
+  },
+  "method": "routes",
+  "version": 9,
+  "has_more": false,
+  "total_items": 18
+ },
+ "response": [
+  {
+   "airline_iata": "DL",
+   "airline_icao": "DAL",
+   "flight_number": "1035",
+   "flight_iata": "DL1035",
+   "flight_icao": "DAL1035",
+   "cs_airline_iata": null,
+   "cs_flight_iata": null,
+   "cs_flight_number": null,
+   "dep_iata": "JFK",
+   "dep_icao": "KJFK",
+   "dep_terminals": [
+    "4"
+   ],
+   "dep_time": "14:35",
+   "dep_time_utc": "18:35",
+   "arr_iata": "LAX",
+   "arr_icao": "KLAX",
+   "arr_terminals": [
+    "3"
+   ],
+   "arr_time": "17:41",
+   "arr_time_utc": "00:41",
+   "duration": 366,
+   "aircraft_icao": null,
+   "counter": 21,
+   "updated": "2026-10-06T08:58:20.000Z",
+   "days": [
+    "tue"
+   ]
+  },
+  {
+   "airline_iata": "DL",
+   "airline_icao": "DAL",
+   "flight_number": "1905",
+   "flight_iata": "DL1905",
+   "flight_icao": "DAL1905",
+   "cs_airline_iata": null,
+   "cs_flight_iata": null,
+   "cs_flight_number": null,
+   "dep_iata": "JFK",
+   "dep_icao": "KJFK",
+   "dep_terminals": [
+    "4"
+   ],
+   "dep_time": "11:00",
+   "dep_time_utc": "15:00",
+   "arr_iata": "LAX",
+   "arr_icao": "KLAX",
+   "arr_terminals": [
+    "3"
+   ],
+   "arr_time": "14:03",
+   "arr_time_utc": "21:03",
+   "duration": 363,
+   "aircraft_icao": null,
+   "counter": 2336,
+   "updated": "2026-10-06T08:58:20.000Z",
+   "days": [
+    "fri",
+    "mon",
+    "sat",
+    "sun",
+    "thu",
+    "tue"
+   ]
+  },
+  {
+   "airline_iata": "DL",
+   "airline_icao": "DAL",
+   "flight_number": "1915",
+   "flight_iata": "DL1915",
+   "flight_icao": "DAL1915",
+   "cs_airline_iata": null,
+   "cs_flight_iata": null,
+   "cs_flight_number": null,
+   "dep_iata": "JFK",
+   "dep_icao": "KJFK",
+   "dep_terminals": [
+    "4"
+   ],
+   "dep_time": "16:40",
+   "dep_time_utc": "20:40",
+   "arr_iata": "LAX",
+   "arr_icao": "KLAX",
+   "arr_terminals": [
+    "3",
+    "2"
+   ],
+   "arr_time": "19:45",
+   "arr_time_utc": "02:45",
+   "duration": 365,
+   "aircraft_icao": null,
+   "counter": 7636,
+   "updated": "2026-09-08T04:00:18.000Z",
+   "days": [
+    "tue",
+    "wed"
+   ]
+  },
+  {
+   "airline_iata": "DL",
+   "airline_icao": "DAL",
+   "flight_number": "1915",
+   "flight_iata": "DL1915",
+   "flight_icao": "DAL1915",
+   "cs_airline_iata": null,
+   "cs_flight_iata": null,
+   "cs_flight_number": null,
+   "dep_iata": "JFK",
+   "dep_icao": "KJFK",
+   "dep_terminals": [
+    "4"
+   ],
+   "dep_time": "19:00",
+   "dep_time_utc": "23:00",
+   "arr_iata": "LAX",
+   "arr_icao": "KLAX",
+   "arr_terminals": [
+    "3",
+    "2"
+   ],
+   "arr_time": "22:10",
+   "arr_time_utc": "05:10",
+   "duration": 370,
+   "aircraft_icao": null,
+   "counter": 7217,
+   "updated": "2026-10-06T07:00:40.000Z",
+   "days": [
+    "fri",
+    "mon",
+    "sun",
+    "thu"
+   ]
+  },
+  {
+   "airline_iata": "DL",
+   "airline_icao": "DAL",
+   "flight_number": "1915",
+   "flight_iata": "DL1915",
+   "flight_icao": "DAL1915",
+   "cs_airline_iata": null,
+   "cs_flight_iata": null,
+   "cs_flight_number": null,
+   "dep_iata": "JFK",
+   "dep_icao": "KJFK",
+   "dep_terminals": [
+    "4"
+   ],
+   "dep_time": "19:05",
+   "dep_time_utc": "23:05",
+   "arr_iata": "LAX",
+   "arr_icao": "KLAX",
+   "arr_terminals": [
+    "3",
+    "2"
+   ],
+   "arr_time": "22:10",
+   "arr_time_utc": "05:10",
+   "duration": 365,
+   "aircraft_icao": null,
+   "counter": 1744,
+   "updated": "2026-10-04T06:59:09.000Z",
+   "days": [
+    "sat"
+   ]
+  },
+  {
+   "airline_iata": "DL",
+   "airline_icao": "DAL",
+   "flight_number": "701",
+   "flight_iata": "DL701",
+   "flight_icao": "DAL701",
+   "cs_airline_iata": null,
+   "cs_flight_iata": null,
+   "cs_flight_number": null,
+   "dep_iata": "JFK",
+   "dep_icao": "KJFK",
+   "dep_terminals": [
+    "4"
+   ],
+   "dep_time": "13:40",
+   "dep_time_utc": "17:40",
+   "arr_iata": "LAX",
+   "arr_icao": "KLAX",
+   "arr_terminals": [
+    "3",
+    "2"
+   ],
+   "arr_time": "16:44",
+   "arr_time_utc": "23:44",
+   "duration": 364,
+   "aircraft_icao": null,
+   "counter": 1325,
+   "updated": "2026-10-06T00:59:19.000Z",
+   "days": [
+    "fri",
+    "mon",
+    "thu"
+   ]
+  },
+  {
+   "airline_iata": "DL",
+   "airline_icao": "DAL",
+   "flight_number": "707",
+   "flight_iata": "DL707",
+   "flight_icao": "DAL707",
+   "cs_airline_iata": null,
+   "cs_flight_iata": null,
+   "cs_flight_number": null,
+   "dep_iata": "JFK",
+   "dep_icao": "KJFK",
+   "dep_terminals": [
+    "4"
+   ],
+   "dep_time": "15:45",
+   "dep_time_utc": "19:45",
+   "arr_iata": "LAX",
+   "arr_icao": "KLAX",
+   "arr_terminals": [
+    "3",
+    "2"
+   ],
+   "arr_time": "18:49",
+   "arr_time_utc": "01:49",
+   "duration": 364,
+   "aircraft_icao": null,
+   "counter": 12173,
+   "updated": "2026-10-06T04:59:56.000Z",
+   "days": [
+    "fri",
+    "mon",
+    "sat",
+    "sun",
+    "thu",
+    "tue",
+    "wed"
+   ]
+  },
+  {
+   "airline_iata": "DL",
+   "airline_icao": "DAL",
+   "flight_number": "713",
+   "flight_iata": "DL713",
+   "flight_icao": "DAL713",
+   "cs_airline_iata": null,
+   "cs_flight_iata": null,
+   "cs_flight_number": null,
+   "dep_iata": "JFK",
+   "dep_icao": "KJFK",
+   "dep_terminals": [
+    "4"
+   ],
+   "dep_time": "08:00",
+   "dep_time_utc": "12:00",
+   "arr_iata": "LAX",
+   "arr_icao": "KLAX",
+   "arr_terminals": [
+    "3",
+    "2"
+   ],
+   "arr_time": "11:08",
+   "arr_time_utc": "18:08",
+   "duration": 368,
+   "aircraft_icao": null,
+   "counter": 68963,
+   "updated": "2026-10-06T08:58:20.000Z",
+   "days": [
+    "fri",
+    "mon",
+    "sat",
+    "sun",
+    "thu",
+    "tue",
+    "wed"
+   ]
+  },
+  {
+   "airline_iata": "DL",
+   "airline_icao": "DAL",
+   "flight_number": "738",
+   "flight_iata": "DL738",
+   "flight_icao": "DAL738",
+   "cs_airline_iata": null,
+   "cs_flight_iata": null,
+   "cs_flight_number": null,
+   "dep_iata": "JFK",
+   "dep_icao": "KJFK",
+   "dep_terminals": [
+    "4"
+   ],
+   "dep_time": "17:45",
+   "dep_time_utc": "21:45",
+   "arr_iata": "LAX",
+   "arr_icao": "KLAX",
+   "arr_terminals": [
+    "3",
+    "2"
+   ],
+   "arr_time": "20:50",
+   "arr_time_utc": "03:50",
+   "duration": 365,
+   "aircraft_icao": null,
+   "counter": 11491,
+   "updated": "2026-10-06T04:59:56.000Z",
+   "days": [
+    "fri",
+    "mon",
+    "sat",
+    "sun",
+    "thu",
+    "tue",
+    "wed"
+   ]
+  },
+  {
+   "airline_iata": "DL",
+   "airline_icao": "DAL",
+   "flight_number": "742",
+   "flight_iata": "DL742",
+   "flight_icao": "DAL742",
+   "cs_airline_iata": null,
+   "cs_flight_iata": null,
+   "cs_flight_number": null,
+   "dep_iata": "JFK",
+   "dep_icao": "KJFK",
+   "dep_terminals": [
+    "4"
+   ],
+   "dep_time": "07:00",
+   "dep_time_utc": "11:00",
+   "arr_iata": "LAX",
+   "arr_icao": "KLAX",
+   "arr_terminals": [
+    "3",
+    "2"
+   ],
+   "arr_time": "10:02",
+   "arr_time_utc": "17:02",
+   "duration": 362,
+   "aircraft_icao": null,
+   "counter": 204928,
+   "updated": "2026-10-06T08:58:20.000Z",
+   "days": [
+    "fri",
+    "mon",
+    "sat",
+    "sun",
+    "thu",
+    "tue",
+    "wed"
+   ]
+  },
+  {
+   "airline_iata": "DL",
+   "airline_icao": "DAL",
+   "flight_number": "747",
+   "flight_iata": "DL747",
+   "flight_icao": "DAL747",
+   "cs_airline_iata": null,
+   "cs_flight_iata": null,
+   "cs_flight_number": null,
+   "dep_iata": "JFK",
+   "dep_icao": "KJFK",
+   "dep_terminals": [
+    "4"
+   ],
+   "dep_time": "13:45",
+   "dep_time_utc": "17:45",
+   "arr_iata": "LAX",
+   "arr_icao": "KLAX",
+   "arr_terminals": [
+    "3",
+    "2"
+   ],
+   "arr_time": "16:42",
+   "arr_time_utc": "23:42",
+   "duration": 357,
+   "aircraft_icao": null,
+   "counter": 40164,
+   "updated": "2026-09-08T01:00:42.000Z",
+   "days": [
+    "sat"
+   ]
+  },
+  {
+   "airline_iata": "DL",
+   "airline_icao": "DAL",
+   "flight_number": "747",
+   "flight_iata": "DL747",
+   "flight_icao": "DAL747",
+   "cs_airline_iata": null,
+   "cs_flight_iata": null,
+   "cs_flight_number": null,
+   "dep_iata": "JFK",
+   "dep_icao": "KJFK",
+   "dep_terminals": [
+    "4"
+   ],
+   "dep_time": "16:45",
+   "dep_time_utc": "20:45",
+   "arr_iata": "LAX",
+   "arr_icao": "KLAX",
+   "arr_terminals": [
+    "3",
+    "TBIT",
+    "2"
+   ],
+   "arr_time": "19:43",
+   "arr_time_utc": "02:43",
+   "duration": 358,
+   "aircraft_icao": null,
+   "counter": 9876,
+   "updated": "2026-10-06T03:59:35.000Z",
+   "days": [
+    "fri",
+    "mon",
+    "sun",
+    "thu",
+    "tue",
+    "wed"
+   ]
+  },
+  {
+   "airline_iata": "DL",
+   "airline_icao": "DAL",
+   "flight_number": "752",
+   "flight_iata": "DL752",
+   "flight_icao": "DAL752",
+   "cs_airline_iata": null,
+   "cs_flight_iata": null,
+   "cs_flight_number": null,
+   "dep_iata": "JFK",
+   "dep_icao": "KJFK",
+   "dep_terminals": [
+    "4"
+   ],
+   "dep_time": "20:20",
+   "dep_time_utc": "00:20",
+   "arr_iata": "LAX",
+   "arr_icao": "KLAX",
+   "arr_terminals": [
+    "3",
+    "2"
+   ],
+   "arr_time": "23:30",
+   "arr_time_utc": "06:30",
+   "duration": 370,
+   "aircraft_icao": null,
+   "counter": 13964,
+   "updated": "2026-10-01T08:00:12.000Z",
+   "days": [
+    "tue",
+    "wed"
+   ]
+  },
+  {
+   "airline_iata": "DL",
+   "airline_icao": "DAL",
+   "flight_number": "752",
+   "flight_iata": "DL752",
+   "flight_icao": "DAL752",
+   "cs_airline_iata": null,
+   "cs_flight_iata": null,
+   "cs_flight_number": null,
+   "dep_iata": "JFK",
+   "dep_icao": "KJFK",
+   "dep_terminals": [
+    "4"
+   ],
+   "dep_time": "20:35",
+   "dep_time_utc": "00:35",
+   "arr_iata": "LAX",
+   "arr_icao": "KLAX",
+   "arr_terminals": [
+    "3",
+    "2"
+   ],
+   "arr_time": "23:43",
+   "arr_time_utc": "06:43",
+   "duration": 368,
+   "aircraft_icao": null,
+   "counter": 8691,
+   "updated": "2026-10-06T08:00:41.000Z",
+   "days": [
+    "fri",
+    "mon",
+    "sat",
+    "sun",
+    "thu"
+   ]
+  },
+  {
+   "airline_iata": "DL",
+   "airline_icao": "DAL",
+   "flight_number": "767",
+   "flight_iata": "DL767",
+   "flight_icao": "DAL767",
+   "cs_airline_iata": null,
+   "cs_flight_iata": null,
+   "cs_flight_number": null,
+   "dep_iata": "JFK",
+   "dep_icao": "KJFK",
+   "dep_terminals": [
+    "4"
+   ],
+   "dep_time": "11:00",
+   "dep_time_utc": "15:00",
+   "arr_iata": "LAX",
+   "arr_icao": "KLAX",
+   "arr_terminals": [
+    "2",
+    "3",
+    "TBIT"
+   ],
+   "arr_time": "13:51",
+   "arr_time_utc": "20:51",
+   "duration": 351,
+   "aircraft_icao": null,
+   "counter": 73834,
+   "updated": "2026-09-30T22:00:44.000Z",
+   "days": [
+    "fri",
+    "mon",
+    "sat",
+    "sun",
+    "thu",
+    "tue",
+    "wed"
+   ]
+  },
+  {
+   "airline_iata": "DL",
+   "airline_icao": "DAL",
+   "flight_number": "771",
+   "flight_iata": "DL771",
+   "flight_icao": "DAL771",
+   "cs_airline_iata": null,
+   "cs_flight_iata": null,
+   "cs_flight_number": null,
+   "dep_iata": "JFK",
+   "dep_icao": "KJFK",
+   "dep_terminals": [
+    "4"
+   ],
+   "dep_time": "14:45",
+   "dep_time_utc": "18:45",
+   "arr_iata": "LAX",
+   "arr_icao": "KLAX",
+   "arr_terminals": [
+    "3",
+    "2"
+   ],
+   "arr_time": "17:43",
+   "arr_time_utc": "00:43",
+   "duration": 358,
+   "aircraft_icao": null,
+   "counter": 10344,
+   "updated": "2026-10-06T02:00:58.000Z",
+   "days": [
+    "fri",
+    "mon",
+    "sat",
+    "sun",
+    "thu",
+    "tue",
+    "wed"
+   ]
+  },
+  {
+   "airline_iata": "DL",
+   "airline_icao": "DAL",
+   "flight_number": "773",
+   "flight_iata": "DL773",
+   "flight_icao": "DAL773",
+   "cs_airline_iata": null,
+   "cs_flight_iata": null,
+   "cs_flight_number": null,
+   "dep_iata": "JFK",
+   "dep_icao": "KJFK",
+   "dep_terminals": [
+    "4"
+   ],
+   "dep_time": "09:00",
+   "dep_time_utc": "13:00",
+   "arr_iata": "LAX",
+   "arr_icao": "KLAX",
+   "arr_terminals": [
+    "3",
+    "2"
+   ],
+   "arr_time": "11:57",
+   "arr_time_utc": "18:57",
+   "duration": 357,
+   "aircraft_icao": null,
+   "counter": 61923,
+   "updated": "2026-10-05T20:00:22.000Z",
+   "days": [
+    "mon",
+    "wed"
+   ]
+  },
+  {
+   "airline_iata": "DL",
+   "airline_icao": "DAL",
+   "flight_number": "773",
+   "flight_iata": "DL773",
+   "flight_icao": "DAL773",
+   "cs_airline_iata": null,
+   "cs_flight_iata": null,
+   "cs_flight_number": null,
+   "dep_iata": "JFK",
+   "dep_icao": "KJFK",
+   "dep_terminals": [
+    "4"
+   ],
+   "dep_time": "09:25",
+   "dep_time_utc": "13:25",
+   "arr_iata": "LAX",
+   "arr_icao": "KLAX",
+   "arr_terminals": [
+    "3"
+   ],
+   "arr_time": "12:31",
+   "arr_time_utc": "19:31",
+   "duration": 366,
+   "aircraft_icao": null,
+   "counter": 9891,
+   "updated": "2026-10-06T08:58:20.000Z",
+   "days": [
+    "fri",
+    "sat",
+    "sun",
+    "thu",
+    "tue"
+   ]
+  }
+ ],
+ "terms": "Unauthorized access is prohibited and punishable by law. \nReselling data 'As Is' without AirLabs.Co permission is strictly prohibited. \nFull terms on https://airlabs.co/. \nContact us info@airlabs.co"
+}
