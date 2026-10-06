@@ -38,8 +38,10 @@ Sunglow is a SvelteKit app (Svelte 5, runes) that predicts sunset and sunrise qu
 
 ### Push alerts
 
-- `PushSubscribeButton.svelte` subscribes via `src/service-worker.ts` and POSTs to `/api/push/subscribe` (Neon via Drizzle, `src/lib/server/db/`).
-- `/api/cron` runs hourly via a cron-job.org job (Vercel Hobby cron is only daily; GitHub Actions schedules ran hours late, so `cron.yml` is manual-only now). It notifies subscribers whose sunset is 2–3 h away and scores ≥ `SUNSET_SCORE_MIN`, deduped per day via `lastNotifiedDate`.
+- `PushSubscribeButton.svelte` subscribes via `src/service-worker.ts` and POSTs to `/api/push/subscribe` with `events: { sunset, sunrise }` (Neon via Drizzle, `src/lib/server/db/`); its checkboxes call `/api/push/preferences`, which only changes the flags. Re-subscribing clears dedup dates only if the location changed.
+- `/api/cron` runs hourly via a cron-job.org job (Vercel Hobby cron is only daily; GitHub Actions schedules ran hours late, so `cron.yml` is manual-only now). Logic lives in `src/lib/server/alerts.ts`:
+  - `alertsDue()` (pure) returns due kinds: `sunset` (2–3 h before), `sunrise-evening` (20:00–23:00 local, tomorrow's sunrise), `sunrise-morning` (1–2 h before). Events come from `nextEvent()`; dedup keys are the event's local date in `lastNotifiedDate` / `lastSunriseEveningDate` / `lastSunriseMorningDate`.
+  - `runAlerts()` predicts, then **claims** the alert (`UPDATE … WHERE col IS DISTINCT FROM key RETURNING`) before sending, so overlapping runs can't double-send; below-threshold results are claimed too, failed sends are released for retry.
 - `/api/cron` requires `Authorization: Bearer $CRON_SECRET`; without a secret it's only open in dev.
 
 ### Ratings

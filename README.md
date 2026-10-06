@@ -285,11 +285,15 @@ src/
 
 ---
 
-## Sunset alerts (Web Push)
-Optional. Copy `.env.example` to `.env.local` and set `DATABASE_URL`, the VAPID keys and `CRON_SECRET`, then run `npm run db:push` once.
+## Sunset & sunrise alerts (Web Push)
+Optional. Copy `.env.example` to `.env.local` and set `DATABASE_URL`, the VAPID keys and `CRON_SECRET`, then apply the migrations (see [Database migrations](#database-migrations)).
 
-- `/api/push/subscribe` stores the subscription with its location.
-- `/api/cron` (requires `Authorization: Bearer $CRON_SECRET`) checks subscribers whose sunset is 2–3 hours away and sends a notification when the score and confidence meet `SUNSET_SCORE_MIN` / `SUNSET_CONFIDENCE_MIN`. At most one alert per location per day.
+- `/api/push/subscribe` stores the subscription with its location and events (`{ sunset, sunrise }`; the first subscribe uses the event currently shown). `/api/push/preferences` changes the events later without moving the location.
+- `/api/cron` (requires `Authorization: Bearer $CRON_SECRET`) sends, when score and confidence meet `SUNSET_SCORE_MIN` / `SUNSET_CONFIDENCE_MIN` (used for both events):
+  - **Sunset:** 2–3 hours before sunset (`NOTIFY_LEAD_HOURS`).
+  - **Sunrise, evening before:** between 20:00 and 23:00 local (`SUNRISE_EVENING_HOUR`), for tomorrow's sunrise.
+  - **Sunrise, morning:** 1–2 hours before sunrise (`SUNRISE_LEAD_HOURS`).
+  - Each kind at most once per event. Alerts are claimed in the database before sending, so overlapping runs can't send twice.
 - Vercel Hobby crons only run daily, so an hourly job on [cron-job.org](https://cron-job.org) calls the endpoint with the bearer header. GitHub Actions schedules were too unreliable (runs 6–9 h apart). `.github/workflows/cron.yml` remains for manual runs and needs the `APP_URL` and `CRON_SECRET` repository secrets.
 
 ---

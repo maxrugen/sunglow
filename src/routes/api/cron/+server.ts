@@ -1,14 +1,13 @@
 import { json } from '@sveltejs/kit';
-import { eq } from 'drizzle-orm';
-import SunCalc from 'suncalc';
+import { and, eq, sql } from 'drizzle-orm';
 import type { RequestHandler } from './$types';
 import { env } from '$env/dynamic/private';
 import { dev } from '$app/environment';
 import { db } from '$lib/server/db';
-import { pushSubscriptions } from '$lib/server/db/schema';
+import { pushSubscriptions, type PushSubscriptionRow } from '$lib/server/db/schema';
 import { sendPush } from '$lib/server/webpush';
-import { predictSunset } from '$lib/server/prediction';
-import type { PushSubscriptionRow } from '$lib/server/db/schema';
+import { predictEvent } from '$lib/server/prediction';
+import { runAlerts, type AlertConfig, type AlertDeps, type AlertKind, type AlertOutcome } from '$lib/server/alerts';
 
 export const config = { maxDuration: 60 };
 
@@ -30,114 +29,48 @@ function cronAuthorized(request: Request): boolean {
   return request.headers.get('authorization') === `Bearer ${secret}`;
 }
 
-function utcDateKey(d: Date): string {
-  return d.toISOString().slice(0, 10); // YYYY-MM-DD
-}
-
-/**
- * Format a UTC instant as HH:MM in the *location's* local wall-clock time by
- * shifting by the location's UTC offset, then reading UTC fields. Returns null
- * for invalid dates (e.g. no golden hour in polar summer/winter).
- */
-function localHM(dateUtc: Date, utcOffsetSeconds: number): string | null {
-  if (!(dateUtc instanceof Date) || isNaN(dateUtc.getTime())) return null;
-  const shifted = new Date(dateUtc.getTime() + utcOffsetSeconds * 1000);
-  const hh = String(shifted.getUTCHours()).padStart(2, '0');
-  const mm = String(shifted.getUTCMinutes()).padStart(2, '0');
-  return `${hh}:${mm}`;
-}
+const deps: AlertDeps<PushSubscriptionRow> = {
+  predict: (event, sub) => predictEvent({ latitude: sub.latitude, longitude: sub.longitude, event }),
+  async claim(sub, due) {
+    const column = pushSubscriptions[due.column];
+    const claimed = await db
+      .update(pushSubscriptions)
+      .set({ [due.column]: due.dayKey })
+      .where(and(eq(pushSubscriptions.endpoint, sub.endpoint), sql`${column} is distinct from ${due.dayKey}`))
+      .returning({ id: pushSubscriptions.id });
+    return claimed.length > 0;
+  },
+  async release(sub, due) {
+    await db
+      .update(pushSubscriptions)
+      .set({ [due.column]: sub[due.column] })
+      .where(and(eq(pushSubscriptions.endpoint, sub.endpoint), eq(pushSubscriptions[due.column], due.dayKey)));
+  },
+  send: (sub, message) => sendPush(sub, message),
+};
 
 async function handle(request: Request, url: URL) {
   if (!cronAuthorized(request)) {
     return json({ error: 'unauthorized' }, { status: 401 });
   }
 
-  const scoreMin = num(env.SUNSET_SCORE_MIN, 80);
-  const confidenceMin = num(env.SUNSET_CONFIDENCE_MIN, 70);
-  const leadHours = num(env.NOTIFY_LEAD_HOURS, 2);
+  const alertConfig: AlertConfig = {
+    sunsetLeadHours: num(env.NOTIFY_LEAD_HOURS, 2),
+    sunriseLeadHours: num(env.SUNRISE_LEAD_HOURS, 1),
+    sunriseEveningHour: num(env.SUNRISE_EVENING_HOUR, 20),
+    scoreMin: num(env.SUNSET_SCORE_MIN, 80),
+    confidenceMin: num(env.SUNSET_CONFIDENCE_MIN, 70),
+  };
   const appUrl = (env.APP_URL || url.origin).replace(/\/$/, '');
-
-  const now = Date.now();
-  const leadWindowStart = leadHours * 3600_000;
-  const leadWindowEnd = (leadHours + 1) * 3600_000;
+  const now = new Date();
 
   const subs = await db.select().from(pushSubscriptions);
-
-  let checked = 0;
-  let sent = 0;
-  let pruned = 0;
+  const outcomes: Record<AlertKind, Partial<Record<AlertOutcome, number>>> = {
+    sunset: {},
+    'sunrise-evening': {},
+    'sunrise-morning': {},
+  };
   let failed = 0;
-  let skipped = 0;
-
-  async function processSubscription(sub: PushSubscriptionRow) {
-    checked++;
-    const times = SunCalc.getTimes(new Date(), sub.latitude, sub.longitude);
-    const sunset = times.sunset;
-    if (!(sunset instanceof Date) || isNaN(sunset.getTime())) {
-      skipped++;
-      return;
-    }
-    const leadMs = sunset.getTime() - now;
-    // Only act in the target hour before sunset (matches the hourly scheduler).
-    if (leadMs < leadWindowStart || leadMs >= leadWindowEnd) {
-      skipped++;
-      return;
-    }
-    const dayKey = utcDateKey(sunset);
-    if (sub.lastNotifiedDate === dayKey) {
-      skipped++;
-      return;
-    }
-
-    let payload;
-    try {
-      payload = await predictSunset({ latitude: sub.latitude, longitude: sub.longitude });
-    } catch {
-      failed++;
-      return;
-    }
-
-    if (payload.qualityScore < scoreMin || payload.confidence < confidenceMin) {
-      // Mark as handled so we don't re-score this sunset on later ticks today.
-      await db
-        .update(pushSubscriptions)
-        .set({ lastNotifiedDate: dayKey })
-        .where(eq(pushSubscriptions.endpoint, sub.endpoint));
-      skipped++;
-      return;
-    }
-
-    const label = sub.label || 'your location';
-    const deepLink =
-      `${appUrl}/?lat=${sub.latitude}&lon=${sub.longitude}` +
-      `&label=${encodeURIComponent(label)}`;
-
-    const goldenHourTime = localHM(times.goldenHour, payload.used.utcOffsetSeconds);
-    const sunsetTime = localHM(sunset, payload.used.utcOffsetSeconds);
-    const body =
-      goldenHourTime && sunsetTime
-        ? `${label}: ${payload.qualityScore}/100 predicted — golden hour at ${goldenHourTime}, sunset at ${sunsetTime}.`
-        : `${label}: ${payload.qualityScore}/100 predicted — golden hour is coming up.`;
-
-    const result = await sendPush(sub, {
-      title: 'Great sunset tonight 🌅',
-      body,
-      url: deepLink,
-      tag: 'sunglow-sunset',
-    });
-
-    if (result === 'sent') {
-      sent++;
-      await db
-        .update(pushSubscriptions)
-        .set({ lastNotifiedDate: dayKey })
-        .where(eq(pushSubscriptions.endpoint, sub.endpoint));
-    } else if (result === 'pruned') {
-      pruned++;
-    } else {
-      failed++;
-    }
-  }
 
   // A fixed pool of workers drains the shared queue.
   const queue = [...subs];
@@ -145,7 +78,9 @@ async function handle(request: Request, url: URL) {
     Array.from({ length: Math.min(CONCURRENCY, queue.length) }, async () => {
       for (let sub = queue.shift(); sub; sub = queue.shift()) {
         try {
-          await processSubscription(sub);
+          for (const { kind, outcome } of await runAlerts(sub, now, alertConfig, appUrl, deps)) {
+            outcomes[kind][outcome] = (outcomes[kind][outcome] ?? 0) + 1;
+          }
         } catch {
           // A DB error for one subscriber shouldn't abort the whole run.
           failed++;
@@ -154,7 +89,15 @@ async function handle(request: Request, url: URL) {
     })
   );
 
-  return json({ checked, sent, pruned, failed, skipped });
+  const total = (outcome: AlertOutcome) =>
+    Object.values(outcomes).reduce((sum, byOutcome) => sum + (byOutcome[outcome] ?? 0), 0);
+  return json({
+    checked: subs.length,
+    sent: total('sent'),
+    pruned: total('pruned'),
+    failed: failed + total('predict-failed') + total('send-failed'),
+    byKind: outcomes,
+  });
 }
 
 export const GET: RequestHandler = ({ request, url }) => handle(request, url);

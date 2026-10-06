@@ -187,7 +187,7 @@
         {:else if predictionData}
             <ResultsDisplay prediction={predictionData} {locationLabel} />
             {#if location}
-                <PushSubscribeButton location={{ latitude: location.latitude, longitude: location.longitude, label: locationLabel }} />
+                <PushSubscribeButton location={{ latitude: location.latitude, longitude: location.longitude, label: locationLabel }} event={selectedEvent} />
             {/if}
         {:else}
             <LocationInput {onLocationSuccess} {onLocationError} />
