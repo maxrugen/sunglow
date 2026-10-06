@@ -79,6 +79,7 @@ Generate with `npm run db:generate`; apply each new `drizzle/000N_*.sql` to Neon
 - Open-Meteo marks missing values with `null`; `Number(null)` is 0, so check `typeof v === 'number'` (horizon, air quality). Air-quality AOD ends ~5 days out; unknown AOD scores neutral.
 - Open-Meteo `timeformat=unixtime` values are **UTC epochs**. Compare them to UTC instants directly; never add `utc_offset_seconds` (only use it to format local wall-clock times).
 - AOD is only available from the air-quality API, not the forecast API.
+- Open-Meteo geocoding matches whole place names: "Jackson Wyoming" finds nothing, "Jackson, Wyoming" works (state name, US state code or ISO country code after the comma). `/api/geocode` retries with a comma before the last one or two words when the plain search is empty, and maps aliases like USA/UK to codes (`src/lib/server/geocode.ts`).
 - Flight times without an offset are wall-clock times local to each airport. The zone comes from coordinates (`@photostructure/tz-lookup`) because `airports.json` has no zone data. The arrival date is resolved as the first matching local time after departure (flights < 24 h).
 - Flight weather is only available up to 16 days ahead; beyond that the response has no score but still has the seat side.
 - `predictEvent()` is shared by the API route, the deep-link load and the cron, so changes affect alerts too.
