@@ -56,4 +56,4 @@ Sunglow is a SvelteKit app (Svelte 5, runes) that predicts sunset quality for a 
 - Flight times without an offset are wall-clock times local to each airport. The zone comes from coordinates (`@photostructure/tz-lookup`) because `airports.json` has no zone data. The arrival date is resolved as the first matching local time after departure (flights < 24 h).
 - Flight weather is only available up to 16 days ahead; beyond that the response has no score but still has the seat side.
 - `predictSunset()` is shared by the API route, the deep-link load and the cron, so changes affect alerts too.
-- Additive bonuses apply after the multiplicative low-cloud gate, so a fully overcast but otherwise ideal evening still scores ~30 (rated Poor).
+- The low-cloud multiplier (ground model) scales the cloud score *and* every positive adjustment: if the sun can't get through, nothing else can add color. Penalties are not scaled.

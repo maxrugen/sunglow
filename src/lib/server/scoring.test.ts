@@ -37,10 +37,9 @@ describe('ground-level score', () => {
     expect(score).toBeGreaterThanOrEqual(80);
   });
 
-  it('rates heavy low cloud as Poor', () => {
-    // Additive bonuses apply after the low-cloud gate, so this stays around 30.
+  it('scores near zero under heavy low cloud, even with every bonus present', () => {
     const score = calculateWithDetails(baseWeather({ lowCloud: 95 })).score;
-    expect(score).toBeLessThan(40);
+    expect(score).toBeLessThan(5);
   });
 
   it('returns 0-100 range', () => {
@@ -254,5 +253,28 @@ describe('horizon factor', () => {
     const a = evaluateInFlight(baseWeather({ horizonCloud: 100 }), true).score;
     const b = evaluateInFlight(baseWeather(), true).score;
     expect(a).toBe(b);
+  });
+});
+
+describe('low-cloud gate on bonuses', () => {
+  const nets = (lowCloud: number) => {
+    const d = calculateWithDetails(baseWeather({ lowCloud, horizonCloud: 5 })).details as Record<string, Record<string, number>>;
+    return { aod: d.aod.bonus, wind: d.wind.net, solar: d.solarAltitude.net, horizon: d.horizon.net, multiplier: d.lowCloud.multiplier };
+  };
+
+  it('leaves bonuses whole when low cloud is at most 25%', () => {
+    expect(nets(25)).toEqual({ aod: 10, wind: 3, solar: 6, horizon: 4, multiplier: 1 });
+  });
+
+  it('scales bonuses by the low-cloud multiplier', () => {
+    const n = nets(55); // multiplier 0.6
+    expect(n.multiplier).toBeCloseTo(0.6);
+    expect(n.aod).toBe(6);
+    expect(n.solar).toBe(4);
+  });
+
+  it('keeps penalties whole', () => {
+    const d = calculateWithDetails(baseWeather({ lowCloud: 95, windSpeed10mMs: 12 })).details as Record<string, Record<string, number>>;
+    expect(d.wind.net).toBe(-4);
   });
 });
