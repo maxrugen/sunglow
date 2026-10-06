@@ -14,7 +14,7 @@ npm run db:generate  # drizzle-kit: generate SQL migration from schema
 npm run db:push      # drizzle-kit: push schema to the database
 ```
 
-Weather and geocoding APIs are public. Push alerts need `DATABASE_URL` (Neon), VAPID keys and `CRON_SECRET`; flight-number lookup needs `AVIATIONSTACK_API_KEY`. See `.env.example`.
+Weather and geocoding APIs are public. Push alerts need `DATABASE_URL` (Neon), VAPID keys and `CRON_SECRET`; finding flights by number/route needs `AIRLABS_API_KEY`. See `.env.example`.
 
 ## Architecture
 
@@ -34,7 +34,7 @@ Sunglow is a SvelteKit app (Svelte 5, runes) that predicts sunset and sunrise qu
 
 ### Flight prediction
 
-`/api/predict-flight`: resolves times (`flight-time.ts`), interpolates the great-circle route, finds waypoints within 60 min of a local sunrise or sunset and groups consecutive ones into sightings (`findEventWindows()` / `bestWaypointPerSighting()` in `flight-route.ts`), then scores each sighting's best waypoint with `evaluateInFlight()` and picks the seat side from sun azimuth vs. heading (`'either'` within 20° of nose or tail). Responds with `sightings[]` in time order. Airports come from `src/lib/server/airports.ts` (server-only; the client searches via `/api/airports?q=`).
+`/api/predict-flight`: resolves times (`flight-time.ts`), interpolates the great-circle route, finds waypoints within 60 min of a local sunrise or sunset and groups consecutive ones into sightings (`findEventWindows()` / `bestWaypointPerSighting()` in `flight-route.ts`), then scores each sighting's best waypoint with `evaluateInFlight()` and picks the seat side from sun azimuth vs. heading (`'either'` within 20° of nose or tail). Responds with `sightings[]` in time order. The form finds flights via `/api/flight-schedules` (`src/lib/server/airlabs.ts`: AirLabs `/v9/routes` timetable, codeshares folded into the operating flight, filtered by weekday, cached 24 h; tests use the recorded fixture in `src/lib/server/__fixtures__/`, never live calls). Airports come from `src/lib/server/airports.ts` (server-only; the client searches via `/api/airports?q=`).
 
 ### Push alerts
 
