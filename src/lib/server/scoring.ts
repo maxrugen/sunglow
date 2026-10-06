@@ -1,8 +1,12 @@
 /**
  * Identifies the scoring model behind stored predictions (see sunset_ratings).
  * Bump it whenever a change alters scores, so ratings can be grouped by model.
+ *
+ * v2: a moderate base for a clear sky, a cloud "canvas" term on top, and the
+ * light gates (low cloud overhead, cloud toward the sun) multiplying the whole
+ * score. v1 added everything up and saturated: clear skies scored ~90.
  */
-export const SCORING_VERSION = 1;
+export const SCORING_VERSION = 2;
 
 export type WeatherData = {
   highCloud: number;
@@ -29,16 +33,54 @@ export type Evaluation = {
   confidence: number;
 };
 
-// ── Factors shared by the ground and in-flight models ───────────────
+// ── Shared factors ──────────────────────────────────────────────────
 
-/** High cloud is the main color canvas; net bonus peaks at 60% cover. */
-function highCloudNet(highCloud: number): number {
-  return 30 * (1 - Math.abs(highCloud - 60) / 60) - 15;
+/** A clear sky still gets some color: roughly the middle of "Fair". */
+const CLEAR_SKY_BASE = 45;
+/** What a fully lit cloud canvas adds on top. */
+const CANVAS_WEIGHT = 45;
+
+/** High cloud lit from below: the main canvas, best at 40–70%; a solid sheet is duller. */
+function highCanvas(pct: number): number {
+  if (pct <= 40) return Math.max(0, pct) / 40;
+  if (pct <= 70) return 1;
+  return 1 - (0.65 * Math.min(pct - 70, 30)) / 30;
 }
 
-/** Mid cloud adds texture; net bonus peaks at 40% cover. */
-function midCloudNet(midCloud: number): number {
-  return 20 * (1 - Math.abs(midCloud - 40) / 40) - 10;
+/** Mid cloud adds texture, best at 20–50%; a thick mid deck blocks the light instead. */
+function midCanvas(pct: number): number {
+  if (pct <= 20) return Math.max(0, pct) / 20;
+  if (pct <= 50) return 1;
+  return Math.max(0, 1 - (pct - 50) / 40);
+}
+
+/** 0–1: how much cloud there is for the low sun to color. */
+function canvasFactor(highCloud: number, midCloud: number, midWeight = 0.4): number {
+  return Math.min(1, 0.65 * highCanvas(highCloud) + midWeight * midCanvas(midCloud));
+}
+
+/**
+ * Light reaching the sky through the path toward the sun: 1 when clear
+ * (≤15% blocked), down to 0.35 when fully blocked. Unknown counts as slightly
+ * below clear, since a clear path can't be assumed.
+ */
+function horizonFactor(blockingPct: number | undefined): number {
+  if (typeof blockingPct !== 'number') return 0.9;
+  return 1 - 0.65 * Math.min(1, Math.max(0, (blockingPct - 15) / 75));
+}
+
+function horizonState(blockingPct: number | undefined): 'clear' | 'partial' | 'blocked' | 'unknown' {
+  if (typeof blockingPct !== 'number') return 'unknown';
+  if (blockingPct < 15) return 'clear';
+  return blockingPct < 60 ? 'partial' : 'blocked';
+}
+
+/** Low cloud overhead hides the sun near the horizon. */
+function lowCloudMultiplier(lowCloud: number): number {
+  let multiplier = 1;
+  if (lowCloud > 25) multiplier *= 1 - (lowCloud - 25) / 75;
+  if (lowCloud > 80) multiplier *= 0.2;
+  return Math.max(0, multiplier);
 }
 
 /** Aerosols only enhance color when the air isn't already humid or hazy. */
@@ -46,8 +88,15 @@ function aerosolAllowed(humidity: number, visibilityM: number | undefined): bool
   return humidity <= 85 && (visibilityM === undefined || visibilityM >= 8000);
 }
 
-function aodBonus(aod: number, allowed: boolean): number {
-  return aod > 0.15 && aod < 0.4 && allowed ? 10 : 0;
+/**
+ * Moderate aerosols scatter warm light (peak +4 at AOD 0.3); heavy smoke or
+ * dust above 0.5 mutes the colors, down to -10.
+ */
+function aodAdj(aod: number, allowed: boolean): number {
+  if (aod > 0.5) return -Math.min(10, (aod - 0.5) * 25);
+  if (!allowed || aod <= 0.05) return 0;
+  if (aod <= 0.3) return (4 * (aod - 0.05)) / 0.25;
+  return 4 - (4 * (aod - 0.3)) / 0.2;
 }
 
 /** Linear penalty for each point above `threshold`. */
@@ -75,8 +124,8 @@ function visibilityPenalty(visibilityM: number | undefined, limitM: number, max:
 /** Rising pressure hints at clearing, falling at incoming weather. */
 function pressureAdj(trendHpa: number | undefined): number {
   if (typeof trendHpa !== 'number') return 0;
-  if (trendHpa > 1) return 3;
-  if (trendHpa < -1) return -3;
+  if (trendHpa > 1) return 2;
+  if (trendHpa < -1) return -2;
   return 0;
 }
 
@@ -84,18 +133,7 @@ function pressureAdj(trendHpa: number | undefined): number {
 function solarAltitudeAdj(deg: number | undefined): number {
   if (typeof deg !== 'number') return 0;
   const dist = Math.abs(deg + 3);
-  return dist <= 5 ? Math.round(6 * (1 - dist / 5)) : 0;
-}
-
-/**
- * Cloud toward the sun cuts off the light that colors clouds overhead. A clear
- * path earns a small bonus; beyond 35% blocking the penalty grows to -25 at 85%.
- */
-function horizonAdj(blockingPct: number | undefined): number {
-  if (typeof blockingPct !== 'number') return 0;
-  if (blockingPct < 15) return 4;
-  if (blockingPct <= 35) return 0;
-  return -Math.round(Math.min(1, (blockingPct - 35) / 50) * 25);
+  return dist <= 5 ? Math.round(3 * (1 - dist / 5)) : 0;
 }
 
 function clampScore(value: number): number {
@@ -126,31 +164,27 @@ export function calculateWithDetails(weatherData: WeatherData): {
     horizonCloud
   } = weatherData;
 
-  const netHigh = highCloudNet(highCloud);
-  const netMid = midCloudNet(midCloud);
-  let score = 100 + netHigh + netMid;
+  const canvas = canvasFactor(highCloud, midCloud);
+  const lowMultiplier = lowCloudMultiplier(lowCloud);
+  const horizon = horizonFactor(horizonCloud);
+  // Both gates decide how much sunlight reaches the sky at all.
+  const light = lowMultiplier * horizon;
 
-  // Low cloud blocks the sun near the horizon, so it scales the whole score.
-  let lowMultiplier = 1;
-  let heavyOvercast = false;
-  if (lowCloud > 25) lowMultiplier *= 1 - (lowCloud - 25) / 75;
-  if (lowCloud > 80) {
-    lowMultiplier *= 0.2;
-    heavyOvercast = true;
-  }
-  const beforeLow = score;
-  score *= lowMultiplier;
-  const lowEffect = score - beforeLow;
-  // Bonuses only matter if sunlight gets through, so the same gate scales them.
+  const sky = CLEAR_SKY_BASE + CANVAS_WEIGHT * canvas;
+  let score = sky * light;
+  const lowEffect = sky * horizon * (lowMultiplier - 1);
+  const horizonEffect = sky * (horizon - 1);
+
+  // Bonuses only matter if sunlight gets through, so the same gates scale them.
   // Penalties stay whole: they describe conditions that hurt regardless.
-  const gate = (adj: number) => (adj > 0 ? adj * lowMultiplier : adj);
+  const gate = (adj: number) => (adj > 0 ? adj * light : adj);
 
-  const humidityPenalty = excessPenalty(humidity, 75, 0.5);
+  const humidityPenalty = excessPenalty(humidity, 75, 0.4);
   score -= humidityPenalty;
 
   const allowed = aerosolAllowed(humidity, visibilityM);
-  const aodAdj = gate(aodBonus(aod, allowed));
-  score += aodAdj;
+  const aerosol = gate(aodAdj(aod, allowed));
+  score += aerosol;
 
   const precipProbPenalty =
     typeof precipitationProbability === 'number' ? excessPenalty(precipitationProbability, 40, 0.2) : 0;
@@ -164,18 +198,18 @@ export function calculateWithDetails(weatherData: WeatherData): {
 
   let dewSpreadAdj = 0;
   if (typeof dewPointSpreadC === 'number') {
-    if (dewPointSpreadC < 2) dewSpreadAdj = -8;
-    else if (dewPointSpreadC < 5) dewSpreadAdj = -4;
-    else if (dewPointSpreadC > 8) dewSpreadAdj = +2;
+    if (dewPointSpreadC < 2) dewSpreadAdj = -6;
+    else if (dewPointSpreadC < 5) dewSpreadAdj = -3;
+    else if (dewPointSpreadC > 8) dewSpreadAdj = +1;
   }
   dewSpreadAdj = gate(dewSpreadAdj);
   score += dewSpreadAdj;
 
   let windAdj = 0;
   if (typeof windSpeed10mMs === 'number') {
-    if (windSpeed10mMs < 1) windAdj = -4;
-    else if (windSpeed10mMs <= 6) windAdj = +3;
-    else if (windSpeed10mMs > 10) windAdj = -4;
+    if (windSpeed10mMs < 1) windAdj = -3;
+    else if (windSpeed10mMs <= 6) windAdj = +1;
+    else if (windSpeed10mMs > 10) windAdj = -3;
   }
   windAdj = gate(windAdj);
   score += windAdj;
@@ -186,8 +220,8 @@ export function calculateWithDetails(weatherData: WeatherData): {
   let pm25Adj = 0;
   if (typeof pm25UgM3 === 'number') {
     // Moderate particulates help only when the air is otherwise clear.
-    if (pm25UgM3 >= 10 && pm25UgM3 <= 35 && allowed) pm25Adj = +4;
-    else if (pm25UgM3 > 60) pm25Adj = -8;
+    if (pm25UgM3 >= 10 && pm25UgM3 <= 35 && allowed) pm25Adj = +2;
+    else if (pm25UgM3 > 60) pm25Adj = -6;
   }
   pm25Adj = gate(pm25Adj);
   score += pm25Adj;
@@ -198,17 +232,15 @@ export function calculateWithDetails(weatherData: WeatherData): {
   const totalCloudAdj = typeof totalCloud === 'number' && totalCloud > 90 ? -5 : 0;
   score += totalCloudAdj;
 
-  const horizon = gate(horizonAdj(horizonCloud));
-  score += horizon;
-
   return {
     score: clampScore(score),
     details: {
-      highCloud: { value: highCloud, net: Math.round(netHigh) },
-      midCloud: { value: midCloud, net: Math.round(netMid) },
-      lowCloud: { value: lowCloud, multiplier: Number(lowMultiplier.toFixed(2)), effect: Math.round(lowEffect), heavyOvercast },
+      canvas: { factor: Number(canvas.toFixed(2)), net: Math.round(CANVAS_WEIGHT * canvas * light) },
+      highCloud: { value: highCloud, net: Math.round(CANVAS_WEIGHT * 0.65 * highCanvas(highCloud) * light) },
+      midCloud: { value: midCloud, net: Math.round(CANVAS_WEIGHT * 0.4 * midCanvas(midCloud) * light) },
+      lowCloud: { value: lowCloud, multiplier: Number(lowMultiplier.toFixed(2)), effect: Math.round(lowEffect), heavyOvercast: lowCloud > 80 },
       humidity: { value: humidity, penalty: Math.round(-humidityPenalty) },
-      aod: { value: aod, bonus: Math.round(aodAdj) },
+      aod: { value: aod, bonus: Math.round(aerosol) },
       precipitation: { probability: precipitationProbability, rateMmH: precipitationMmPerHour, penaltyProb: Math.round(-precipProbPenalty), penaltyRate: Math.round(-precipPenalty) },
       visibility: { meters: visibilityM, penalty: Math.round(-visPenalty) },
       dewSpread: { celsius: dewPointSpreadC, net: Math.round(dewSpreadAdj) },
@@ -217,12 +249,21 @@ export function calculateWithDetails(weatherData: WeatherData): {
       totalCloud: { value: totalCloud, net: totalCloudAdj },
       pm25: { ugm3: pm25UgM3, net: Math.round(pm25Adj) },
       solarAltitude: { deg: solarAltitudeDeg, net: Math.round(solarAdj) },
-      horizon: { blockingPct: horizonCloud, net: Math.round(horizon) }
+      horizon: {
+        blockingPct: horizonCloud,
+        factor: Number(horizon.toFixed(2)),
+        state: horizonState(horizonCloud),
+        net: Math.round(horizonEffect),
+      }
     }
   };
 }
 
-export function calculateConfidence(weatherData: WeatherData, alignedToEvent: boolean): number {
+/**
+ * 0–100: how much to trust the score. `leadHours` is how far ahead the event
+ * is; forecasts for tomorrow evening are less certain than for the next hour.
+ */
+export function calculateConfidence(weatherData: WeatherData, alignedToEvent: boolean, leadHours = 0): number {
   let confidence = 90;
 
   const pop = weatherData.precipitationProbability ?? 0;
@@ -236,24 +277,30 @@ export function calculateConfidence(weatherData: WeatherData, alignedToEvent: bo
   if (vis !== undefined && vis < 5000) confidence -= 15;
   if (pm25 !== undefined && pm25 > 60) confidence -= 10;
   if (!alignedToEvent) confidence -= 10;
+  confidence -= Math.min(15, Math.floor(Math.max(0, leadHours) / 3));
 
   return clampScore(confidence);
 }
 
-export function evaluate(weatherData: WeatherData, alignedToEvent: boolean): Evaluation {
+export function evaluate(weatherData: WeatherData, alignedToEvent: boolean, leadHours = 0): Evaluation {
   const { score, details } = calculateWithDetails(weatherData);
-  const confidence = calculateConfidence(weatherData, alignedToEvent);
+  const confidence = calculateConfidence(weatherData, alignedToEvent, leadHours);
   return { score, details, confidence };
 }
 
 // ── In-flight model ─────────────────────────────────────────────────
 
+/** From cruise altitude the view is above most weather, so a clear sky rates a bit higher. */
+const FLIGHT_CLEAR_BASE = 50;
+const FLIGHT_CANVAS_WEIGHT = 40;
+
 /**
  * In-flight sunrise/sunset scoring: adapts the ground-level model for cruise altitude (~10km).
  *
  * Key differences from ground-level evaluate():
- * - Low clouds are *below* the plane → penalty is inverted to a mild bonus (cloud-top views)
- * - PM2.5 is irrelevant at altitude → ignored
+ * - Mid and low clouds are mostly *below* the plane: they form a "carpet"
+ *   (mild bonus) rather than blocking the sun; only high cloud is the canvas
+ * - No horizon sampling and no PM2.5 (irrelevant at altitude)
  * - Humidity, precipitation, visibility and surface wind matter less
  * - Confidence is lower because forecasts are surface-level
  */
@@ -274,21 +321,21 @@ export function evaluateInFlight(weatherData: WeatherData, alignedToEvent: boole
     dewPointSpreadC,
   } = weatherData;
 
-  const netHigh = highCloudNet(highCloud);
-  const netMid = midCloudNet(midCloud);
-  let score = 100 + netHigh + netMid;
+  // Mid cloud below the plane adds texture to the view, but isn't the main canvas.
+  const canvas = canvasFactor(highCloud, midCloud, 0.25);
+  let score = FLIGHT_CLEAR_BASE + FLIGHT_CANVAS_WEIGHT * canvas;
 
   // Low clouds below the plane form a cloud-top canvas instead of blocking the sun.
   let lowCloudAdj = 0;
-  if (lowCloud > 20 && lowCloud <= 70) lowCloudAdj = +5;
-  else if (lowCloud > 70) lowCloudAdj = +3;
+  if (lowCloud > 20 && lowCloud <= 70) lowCloudAdj = +3;
+  else if (lowCloud > 70) lowCloudAdj = +2;
   score += lowCloudAdj;
 
   const humidityPenalty = excessPenalty(humidity, 80, 0.3);
   score -= humidityPenalty;
 
-  const aodAdj = aodBonus(aod, aerosolAllowed(humidity, visibilityM));
-  score += aodAdj;
+  const aerosol = aodAdj(aod, aerosolAllowed(humidity, visibilityM));
+  score += aerosol;
 
   const precipProbPenalty =
     typeof precipitationProbability === 'number' ? excessPenalty(precipitationProbability, 50, 0.15) : 0;
@@ -302,7 +349,7 @@ export function evaluateInFlight(weatherData: WeatherData, alignedToEvent: boole
 
   let dewSpreadAdj = 0;
   if (typeof dewPointSpreadC === 'number') {
-    if (dewPointSpreadC < 2) dewSpreadAdj = -4;
+    if (dewPointSpreadC < 2) dewSpreadAdj = -3;
     else if (dewPointSpreadC > 8) dewSpreadAdj = +1;
   }
   score += dewSpreadAdj;
@@ -316,7 +363,8 @@ export function evaluateInFlight(weatherData: WeatherData, alignedToEvent: boole
   const solarAdj = solarAltitudeAdj(solarAltitudeDeg);
   score += solarAdj;
 
-  const totalCloudAdj = typeof totalCloud === 'number' && totalCloud > 95 ? -3 : 0;
+  // A complete high overcast can put the plane in or under it.
+  const totalCloudAdj = typeof totalCloud === 'number' && totalCloud > 95 && highCloud > 80 ? -5 : 0;
   score += totalCloudAdj;
 
   let confidence = 80; // baseline lower than ground's 90
@@ -330,11 +378,12 @@ export function evaluateInFlight(weatherData: WeatherData, alignedToEvent: boole
   return {
     score: clampScore(score),
     details: {
-      highCloud: { value: highCloud, net: Math.round(netHigh) },
-      midCloud: { value: midCloud, net: Math.round(netMid) },
+      canvas: { factor: Number(canvas.toFixed(2)), net: Math.round(FLIGHT_CANVAS_WEIGHT * canvas) },
+      highCloud: { value: highCloud, net: Math.round(FLIGHT_CANVAS_WEIGHT * 0.65 * highCanvas(highCloud)) },
+      midCloud: { value: midCloud, net: Math.round(FLIGHT_CANVAS_WEIGHT * 0.25 * midCanvas(midCloud)) },
       lowCloud: { value: lowCloud, adjustment: lowCloudAdj, note: 'inverted for altitude' },
       humidity: { value: humidity, penalty: Math.round(-humidityPenalty) },
-      aod: { value: aod, bonus: aodAdj },
+      aod: { value: aod, bonus: Math.round(aerosol) },
       precipitation: { probability: precipitationProbability, rateMmH: precipitationMmPerHour, penaltyProb: Math.round(-precipProbPenalty), penaltyRate: Math.round(-precipPenalty) },
       visibility: { meters: visibilityM, penalty: Math.round(-visPenalty) },
       dewSpread: { celsius: dewPointSpreadC, net: dewSpreadAdj },

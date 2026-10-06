@@ -90,7 +90,7 @@ describe('calculateWithDetails()', () => {
 
   it('solar altitude at -3° gets maximum bonus', () => {
     const optimal = calculateWithDetails(baseWeather({ solarAltitudeDeg: -3 }));
-    expect((optimal.details.solarAltitude as any).net).toBe(6);
+    expect((optimal.details.solarAltitude as any).net).toBe(3);
   });
 
   it('solar altitude far from -3° gets no bonus', () => {
@@ -100,12 +100,12 @@ describe('calculateWithDetails()', () => {
 
   it('PM2.5 10-35 gives bonus when air is clear', () => {
     const result = calculateWithDetails(baseWeather({ pm25UgM3: 20 }));
-    expect((result.details.pm25 as any).net).toBe(4);
+    expect((result.details.pm25 as any).net).toBe(2);
   });
 
   it('PM2.5 >60 gives penalty', () => {
     const result = calculateWithDetails(baseWeather({ pm25UgM3: 80 }));
-    expect((result.details.pm25 as any).net).toBe(-8);
+    expect((result.details.pm25 as any).net).toBe(-6);
   });
 
   it('score is clamped to 0-100', () => {
@@ -228,25 +228,25 @@ describe('evaluateInFlight()', () => {
 });
 
 describe('horizon factor', () => {
-  it('has no effect without horizon data', () => {
-    const { details } = calculateWithDetails(baseWeather());
-    expect((details.horizon as { net: number }).net).toBe(0);
+  const horizon = (horizonCloud?: number) =>
+    calculateWithDetails(baseWeather({ horizonCloud })).details.horizon as { factor: number; state: string; net: number };
+
+  it('keeps full light with a clear path toward the sun', () => {
+    expect(horizon(5)).toMatchObject({ factor: 1, state: 'clear', net: 0 });
   });
 
-  it('gives a small bonus for a clear path toward the sun', () => {
-    const clear = calculateWithDetails(baseWeather({ horizonCloud: 5 }));
-    expect((clear.details.horizon as { net: number }).net).toBe(4);
+  it('treats an unknown horizon as slightly below clear', () => {
+    expect(horizon(undefined)).toMatchObject({ factor: 0.9, state: 'unknown' });
   });
 
-  it('penalises a blocked horizon, up to -25', () => {
-    const net = (horizonCloud: number) =>
-      (calculateWithDetails(baseWeather({ horizonCloud })).details.horizon as { net: number }).net;
-    expect(net(30)).toBe(0);
-    expect(net(60)).toBe(-13);
-    expect(net(100)).toBe(-25);
-    // Visible in the score when it isn't clamped at 100.
-    const mixed = baseWeather({ highCloud: 20, midCloud: 10 });
-    expect(calculateWithDetails({ ...mixed, horizonCloud: 90 }).score).toBeLessThan(calculateWithDetails(mixed).score);
+  it('scales the whole score down to 35% as the path gets blocked', () => {
+    expect(horizon(60)).toMatchObject({ state: 'blocked' });
+    expect(horizon(60).factor).toBeCloseTo(0.61, 2);
+    expect(horizon(100).factor).toBeCloseTo(0.35, 2);
+    const canvas = { highCloud: 55, midCloud: 30, lowCloud: 5 };
+    const clear = calculateWithDetails(baseWeather({ ...canvas, horizonCloud: 5 })).score;
+    const blocked = calculateWithDetails(baseWeather({ ...canvas, horizonCloud: 95 })).score;
+    expect(blocked).toBeLessThan(clear * 0.5);
   });
 
   it('does not affect the in-flight model', () => {
@@ -256,25 +256,45 @@ describe('horizon factor', () => {
   });
 });
 
-describe('low-cloud gate on bonuses', () => {
+describe('light gates on bonuses', () => {
   const nets = (lowCloud: number) => {
     const d = calculateWithDetails(baseWeather({ lowCloud, horizonCloud: 5 })).details as Record<string, Record<string, number>>;
-    return { aod: d.aod.bonus, wind: d.wind.net, solar: d.solarAltitude.net, horizon: d.horizon.net, multiplier: d.lowCloud.multiplier };
+    return { aod: d.aod.bonus, wind: d.wind.net, solar: d.solarAltitude.net, multiplier: d.lowCloud.multiplier };
   };
 
-  it('leaves bonuses whole when low cloud is at most 25%', () => {
-    expect(nets(25)).toEqual({ aod: 10, wind: 3, solar: 6, horizon: 4, multiplier: 1 });
+  it('leaves bonuses whole when low cloud is at most 25% and the horizon is clear', () => {
+    expect(nets(25)).toEqual({ aod: 2, wind: 1, solar: 3, multiplier: 1 });
   });
 
   it('scales bonuses by the low-cloud multiplier', () => {
     const n = nets(55); // multiplier 0.6
     expect(n.multiplier).toBeCloseTo(0.6);
-    expect(n.aod).toBe(6);
-    expect(n.solar).toBe(4);
+    expect(n.aod).toBe(1);
+    expect(n.solar).toBe(2);
   });
 
   it('keeps penalties whole', () => {
     const d = calculateWithDetails(baseWeather({ lowCloud: 95, windSpeed10mMs: 12 })).details as Record<string, Record<string, number>>;
-    expect(d.wind.net).toBe(-4);
+    expect(d.wind.net).toBe(-3);
+  });
+});
+
+describe('aerosols', () => {
+  const bonus = (aod: number) => (calculateWithDetails(baseWeather({ aod, horizonCloud: 5 })).details.aod as { bonus: number }).bonus;
+
+  it('peaks around AOD 0.3 and turns into a penalty for smoke or dust', () => {
+    expect(bonus(0.05)).toBe(0);
+    expect(bonus(0.3)).toBe(4);
+    expect(bonus(0.5)).toBe(0);
+    expect(bonus(0.9)).toBe(-10);
+  });
+});
+
+describe('confidence lead time', () => {
+  it('drops slowly with how far ahead the event is, by at most 15', () => {
+    const w = baseWeather();
+    expect(calculateConfidence(w, true, 0)).toBe(90);
+    expect(calculateConfidence(w, true, 10)).toBe(87);
+    expect(calculateConfidence(w, true, 200)).toBe(75);
   });
 });

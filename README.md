@@ -99,22 +99,21 @@ Core logic lives in:
 `src/lib/server/scoring.ts`
 
 - `WeatherData` type describes inputs (cloud layers, humidity, AOD, PM2.5, visibility, wind, pressure trend, dewpoint spread, solar altitude, etc.)
-- `calculateWithDetails(weatherData)` computes:
-  - High/mid cloud bonuses (peak bands)
-  - Low cloud multiplicative gate: scales the cloud score and all bonuses (no bonus can add color if the sun is blocked); penalties apply in full
-  - Humidity/visibility/haze dampening
-  - Precipitation penalties
-  - Aerosol/PM2.5 bonus within sensible humidity/visibility ranges
-  - Solar altitude band weighting (peak around −3°, effective in [−8°, +2°])
-  - Horizon toward the sun: low cloud (plus half of mid cloud) sampled 50/150/300 km along the sunset azimuth (`src/lib/server/horizon.ts`). A clear path gives +4; blocking above 35% costs up to −25. Ground model only.
-- `calculateConfidence(weatherData, alignedToSunset)` factors POP/precip, low clouds, visibility, particulates, and whether data was aligned to the real sunset
-- `evaluateInFlight(weatherData, alignedToSunset)` adapts the model for cruise altitude (~10 km):
-  - Low clouds are inverted to a bonus (cloud‑top canvas)
+- `calculateWithDetails(weatherData)` (model v2, `SCORING_VERSION = 2`) computes:
+  - **Sky:** a clear‑sky base of 45 plus up to 45 for the cloud "canvas" (high cloud best at 40–70%, mid cloud best at 20–50%; a solid sheet or thick mid deck counts less). A clear sky lands around 50 ("Fair"); only a lit canvas reaches "Great".
+  - **Light gates, multiplying everything:** low cloud overhead (fades from 25%, near zero above 80%) and the horizon toward the sun: low cloud plus half of mid cloud sampled 50/150/300 km along the sun's azimuth (`src/lib/server/horizon.ts`, weights 0.1/0.45/0.45), from ×1 when clear down to ×0.35 when blocked. Ground model only.
+  - Small bonuses (aerosols peaking at AOD 0.3, PM2.5, sun angle, wind, pressure, dew point; about +10 in total), scaled by the light gates
+  - Penalties applied in full: humidity, precipitation, visibility, heavy smoke (AOD > 0.5), total overcast
+- `calculateConfidence(weatherData, alignedToEvent, leadHours)` factors POP/precip, low clouds, visibility, particulates, whether data was aligned to the real event, and how far ahead the event is (−1 per 3 h, at most −15)
+- `evaluateInFlight(weatherData, alignedToEvent)` adapts the model for cruise altitude (~10 km):
+  - Clear‑sky base 50; only high cloud is the canvas (mid cloud below the plane adds a little texture)
+  - Low clouds are a small bonus (cloud‑top carpet)
   - PM2.5 is ignored (irrelevant at altitude)
   - Humidity threshold raised to 80% (less effect at altitude)
   - Visibility and precipitation penalties are reduced
   - Confidence baseline is 80 (vs. 90) since forecasts are surface‑level
-- `evaluate(weatherData, alignedToSunset)` returns `{ score, details, confidence }`
+- `evaluate(weatherData, alignedToEvent, leadHours)` returns `{ score, details, confidence }`
+- `src/lib/server/scoring-scenarios.test.ts` pins the label of reference skies (clear, canvas, blocked horizon, overcast, rain, smoke). Changing the model means updating those expectations deliberately and bumping `SCORING_VERSION`.
 
 ### API endpoints
 
