@@ -1,4 +1,4 @@
-name: Sunset alert cron
+name: Sky alert cron (manual)
 
 # Manual trigger for /api/cron (Actions tab → Run workflow), e.g. for testing.
 # The hourly schedule runs on cron-job.org: GitHub's scheduled runs were

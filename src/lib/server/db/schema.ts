@@ -1,4 +1,5 @@
 import {
+  boolean,
   doublePrecision,
   integer,
   jsonb,
@@ -14,8 +15,9 @@ const ts = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' 
 
 /**
  * Web Push subscriptions — one row per installed device. Extends the plain
- * subscription with the location the user wants sunset alerts for, plus a
- * dedup key so the cron sends at most one notification per location per day.
+ * subscription with the location the user wants alerts for, which events
+ * (sunset/sunrise) to alert on, and one dedup date per alert kind so the cron
+ * sends each kind at most once per event.
  */
 export const pushSubscriptions = pgTable(
   'push_subscriptions',
@@ -28,8 +30,14 @@ export const pushSubscriptions = pgTable(
     longitude: doublePrecision('longitude').notNull(),
     label: text('label'),
     userAgent: text('user_agent'),
-    /** YYYY-MM-DD of the last sunset we notified about (dedup key). */
+    alertSunset: boolean('alert_sunset').notNull().default(true),
+    alertSunrise: boolean('alert_sunrise').notNull().default(false),
+    /** Local YYYY-MM-DD of the last sunset alerted or checked (dedup key). */
     lastNotifiedDate: text('last_notified_date'),
+    /** Local YYYY-MM-DD of the sunrise last handled by the evening-before alert. */
+    lastSunriseEveningDate: text('last_sunrise_evening_date'),
+    /** Local YYYY-MM-DD of the sunrise last handled by the ~1 h-before alert. */
+    lastSunriseMorningDate: text('last_sunrise_morning_date'),
     createdAt: ts('created_at').notNull().defaultNow(),
   },
   (t) => [uniqueIndex('push_endpoint_uq').on(t.endpoint)]
