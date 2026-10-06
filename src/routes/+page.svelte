@@ -68,7 +68,7 @@
     }
 
     function rememberLocation(latitude: number, longitude: number) {
-        try { localStorage.setItem('sunglow:last', JSON.stringify({ latitude, longitude, label: locationLabel })); } catch {}
+        try { localStorage.setItem('sunglow:last', JSON.stringify({ latitude, longitude, label: locationLabel })); } catch { /* storage unavailable */ }
     }
 
     async function fetchPrediction(latitude: number, longitude: number) {
@@ -128,7 +128,7 @@
     function selectEvent(event: SkyEvent) {
         if (event === selectedEvent) return;
         selectedEvent = event;
-        try { localStorage.setItem('sunglow:event', event); } catch {}
+        try { localStorage.setItem('sunglow:event', event); } catch { /* storage unavailable */ }
         // Re-run the prediction for the location on screen (also if one is still loading).
         if (location && (predictionData || isLoading || errorMessage)) fetchPrediction(location.latitude, location.longitude);
     }
@@ -138,7 +138,7 @@
             try {
                 const stored = localStorage.getItem('sunglow:event');
                 if (isSkyEvent(stored)) selectedEvent = stored;
-            } catch {}
+            } catch { /* storage unavailable */ }
         }
         if (!ssr) return;
         applyScoreTheme(ssr.qualityScore);
@@ -201,16 +201,10 @@
 
 <svelte:head>
     <title>Sunglow — Sunset &amp; Sunrise Quality Prediction</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="description" content="Predict sunset and sunrise quality with real-time weather and solar timings." />
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous">
-    <link rel="preconnect" href="https://api.open-meteo.com" crossorigin="anonymous">
-    <link rel="preconnect" href="https://geocoding-api.open-meteo.com" crossorigin="anonymous">
+    <!-- Reverse geocoding for "Use My Location" runs in the browser. -->
     <link rel="preconnect" href="https://api.bigdatacloud.net" crossorigin="anonymous">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
-    <meta name="theme-color" content="#0d3b66" />
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='40' fill='%23ffcc80'/></svg>">
+    <meta name="theme-color" content="#3e4a61" />
 </svelte:head>
 
 <main class="shell">
@@ -226,7 +220,7 @@
 
     {#if mode === 'location'}
         <div class="mode-toggle event-toggle" role="group" aria-label="Sunset or sunrise">
-            {#each SKY_EVENTS as event}
+            {#each SKY_EVENTS as event (event)}
                 <button
                     class="toggle-btn"
                     class:active={selectedEvent === event}

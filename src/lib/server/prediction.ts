@@ -172,7 +172,9 @@ export async function predictEvent({
     const sunPos = SunCalc.getPosition(new Date(selectedEpochSec * 1000), latitude, longitude);
     const deg = (sunPos.altitude * 180) / Math.PI;
     if (Number.isFinite(deg)) solarAltitudeDeg = deg;
-  } catch {}
+  } catch {
+    // No solar position (e.g. invalid time): scored without the sun-angle term.
+  }
 
   const weatherData: PredictionPayload['weatherData'] = {
     highCloud: c.highCloud,

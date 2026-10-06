@@ -16,7 +16,7 @@
 html, body { height: 100%; }
 body {
   margin: 0;
-  font-family: 'Inter', system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+  font-family: 'Inter Variable', 'Inter', system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
   background: linear-gradient(to bottom, var(--background-start), var(--background-end));
   color: var(--text-primary);
   transition: background 400ms ease, color 250ms ease;
@@ -74,6 +74,15 @@ input:focus { border-color: var(--text-accent); }
 }
 
 .error-text { color: var(--error); }
+
+/* Shared by the location and flight result cards. */
+.accent { color: var(--text-accent); }
+.badge { font-size: 0.9rem; padding: 0.25rem 0.5rem; border-radius: 999px; border: 1px solid currentColor; }
+.metrics { display: grid; gap: 0.7rem; }
+.metrics .row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.metrics .row strong { font-weight: 600; text-align: right; }
+.explain { margin-top: 1rem; }
+.explain :is(h3, h4) { margin: 0 0 0.5rem; font-size: 1rem; }
 
 /* Utility */
 .visually-hidden {

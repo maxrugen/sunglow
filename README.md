@@ -24,7 +24,7 @@ Sunset and sunrise quality prediction web app built with SvelteKit and TypeScrip
 - TypeScript
 - SunCalc
 - Open‑Meteo (Weather + Geocoding) and BigDataCloud (reverse geocoding, called from the browser)
-- Plain CSS with CSS Custom Properties
+- Plain CSS with CSS Custom Properties; Inter is self‑hosted via `@fontsource-variable/inter` (no Google Fonts request)
 - Neon Postgres + Drizzle (push subscriptions), Web Push (VAPID)
 
 ---
@@ -63,6 +63,7 @@ Without it, manual airport entry still works; the lookup section is simply hidde
 ### Running tests
 ```bash
 npm test          # run all tests once
+npm run lint      # ESLint
 npm run test:watch # watch mode
 ```
 

@@ -9,6 +9,7 @@ npm run dev          # start dev server at http://localhost:5173
 npm run build        # production build
 npm run preview      # preview production build
 npm run typecheck    # svelte-check (TypeScript)
+npm run lint         # ESLint (correctness rules; runs in CI)
 npm test             # vitest (server logic: scoring, weather, flight, prediction)
 npm run db:generate  # drizzle-kit: generate SQL migration from schema
 npm run db:push      # drizzle-kit: push schema to the database
@@ -64,6 +65,7 @@ Generate with `npm run db:generate`; apply each new `drizzle/000N_*.sql` to Neon
 - `src/lib/server/bounded-cache.ts` — TTL + size-capped in-memory cache used by the prediction and flight endpoints.
 - `src/lib/server/weather.ts` — Open-Meteo fetches, `nearestIndex()`, `compositeAt()` (weights `[0.3, 0.6, 0.1]` over `[idx-1, idx, idx+1]`), `fetchWithRetry()` (retries 5xx/429 only).
 - `src/lib/score.ts` — `scoreLabel()`, `applyScoreTheme()` / `resetScoreTheme()`: one set of score bands (80/65/40) for labels and page theme. Each theme sets `--surface`, `--surface-strong`, `--border`, `--placeholder`, `--error` and `color-scheme`; components use these variables instead of fixed colors. `score.test.ts` checks WCAG 4.5:1 contrast for every theme, so keep it passing when changing colors.
+- `src/lib/explain.ts` — `explainScore()`: the plain-language "Why this score?" text for both models, with each model's own thresholds.
 - `src/lib/components/Combobox.svelte` — the one accessible autocomplete (WAI-ARIA combobox: `aria-activedescendant`, always-mounted status). Use it for any new search field.
 - UI conventions: inputs stay mounted (hidden) while results show, so "New search"/"Edit flight" keep what was typed; announcements go through the page's always-mounted `role="status"`, errors through its `role="alert"` region with a Retry action.
 - `src/lib/types.ts` — shared client types and `toClientPrediction()`.

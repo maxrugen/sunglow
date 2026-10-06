@@ -25,7 +25,7 @@
     function saveAlerts(events: AlertEvents, label = alertLabel) {
         alertEvents = events;
         alertLabel = label;
-        try { localStorage.setItem(ALERTS_KEY, JSON.stringify({ ...events, label })); } catch {}
+        try { localStorage.setItem(ALERTS_KEY, JSON.stringify({ ...events, label })); } catch { /* storage unavailable */ }
     }
 
     const vapid = env.PUBLIC_VAPID_PUBLIC_KEY;
@@ -78,7 +78,7 @@
                 alertEvents = { sunset: stored.sunset === true, sunrise: stored.sunrise === true };
                 alertLabel = typeof stored.label === 'string' ? stored.label : '';
             }
-        } catch {}
+        } catch { /* storage unavailable or corrupt */ }
         try {
             const reg = await navigator.serviceWorker.getRegistration();
             const sub = reg ? await reg.pushManager.getSubscription() : null;
@@ -174,7 +174,7 @@
                 });
                 await sub.unsubscribe();
             }
-            try { localStorage.removeItem(ALERTS_KEY); } catch {}
+            try { localStorage.removeItem(ALERTS_KEY); } catch { /* storage unavailable */ }
             status = 'default';
             message = 'Unsubscribed on this device.';
         } catch {
@@ -202,7 +202,7 @@
     {:else if status === 'subscribed'}
         <fieldset class="push-events">
             <legend>Alerts on this device{alertLabel ? ` for ${alertLabel}` : ''}</legend>
-            {#each SKY_EVENTS as e}
+            {#each SKY_EVENTS as e (e)}
                 <label>
                     <input type="checkbox" checked={alertEvents[e]} onchange={() => toggleEvent(e)} />
                     {EVENT_COPY[e].icon} {EVENT_COPY[e].title}s

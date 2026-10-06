@@ -91,7 +91,7 @@
         onblur={() => (open = false)}
     />
     <ul id={listboxId} role="listbox" aria-label={label} class="listbox" hidden={!open}>
-        {#each items as item, i}
+        {#each items as item, i (i)}
             <!-- Keyboard use goes through the input (combobox pattern), so options need no key handlers. -->
             <!-- svelte-ignore a11y_click_events_have_key_events -->
             <li
