@@ -9,7 +9,8 @@
     import { onMount, untrack } from 'svelte';
     import { applyScoreTheme } from '$lib/score';
     import { errorMessageFrom } from '$lib/http';
-    import { toClientPrediction, type ClientPrediction, type FlightPredictionResponse } from '$lib/types';
+    import { toClientPrediction, type ClientPrediction, type FlightPredictionResponse, type SkyEvent } from '$lib/types';
+    import { EVENT_COPY, SKY_EVENTS, isSkyEvent } from '$lib/events';
     import type { PageData } from './$types';
 
     let { data }: { data: PageData } = $props();
@@ -27,6 +28,9 @@
         ssr ? { latitude: ssr.latitude, longitude: ssr.longitude } : null
     );
     let locationLabel: string = $state(ssr?.label ?? '');
+    // Sunset or sunrise: from the deep link if given, else the last choice (restored on mount).
+    const linkedEvent = untrack(() => data.event);
+    let selectedEvent: SkyEvent = $state(linkedEvent ?? 'sunset');
 
     // Flight mode state
     let flightPrediction: FlightPredictionResponse | null = $state(null);
@@ -45,7 +49,7 @@
             const res = await fetch('/api/predict', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ latitude, longitude })
+                body: JSON.stringify({ latitude, longitude, event: selectedEvent })
             });
             if (!res.ok) throw new Error(await errorMessageFrom(res, 'Prediction request failed'));
 
@@ -85,7 +89,21 @@
     }
 
     // Note: we no longer auto-load the last location on mount so that a reload returns to the search view.
+    function selectEvent(event: SkyEvent) {
+        if (event === selectedEvent) return;
+        selectedEvent = event;
+        try { localStorage.setItem('sunglow:event', event); } catch {}
+        // Re-run the prediction for the location already on screen.
+        if (location && (predictionData || errorMessage)) fetchPrediction(location.latitude, location.longitude);
+    }
+
     onMount(() => {
+        if (!linkedEvent) {
+            try {
+                const stored = localStorage.getItem('sunglow:event');
+                if (isSkyEvent(stored)) selectedEvent = stored;
+            } catch {}
+        }
         if (!ssr) return;
         applyScoreTheme(ssr.qualityScore);
         rememberLocation(ssr.latitude, ssr.longitude);
@@ -125,9 +143,9 @@
 </script>
 
 <svelte:head>
-    <title>Sunglow — Sunset Quality Prediction</title>
+    <title>Sunglow — Sunset &amp; Sunrise Quality Prediction</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="description" content="Predict sunset quality with real-time weather and solar timings." />
+    <meta name="description" content="Predict sunset and sunrise quality with real-time weather and solar timings." />
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous">
     <link rel="preconnect" href="https://api.open-meteo.com" crossorigin="anonymous">
@@ -142,7 +160,7 @@
 <main class="shell">
     <header class="header">
         <h1>Sunglow</h1>
-        <p class="tagline">{mode === 'location' ? "Predict tonight's sunset quality" : 'Will you see a sunset on your flight?'}</p>
+        <p class="tagline">{mode === 'location' ? EVENT_COPY[selectedEvent].tagline : 'Will you see a sunset on your flight?'}</p>
     </header>
 
     <nav class="mode-toggle" aria-label="Prediction mode">
@@ -151,6 +169,18 @@
     </nav>
 
     {#if mode === 'location'}
+        <div class="mode-toggle event-toggle" role="group" aria-label="Sunset or sunrise">
+            {#each SKY_EVENTS as event}
+                <button
+                    class="toggle-btn"
+                    class:active={selectedEvent === event}
+                    aria-pressed={selectedEvent === event}
+                    onclick={() => selectEvent(event)}
+                >
+                    <span aria-hidden="true">{EVENT_COPY[event].icon}&nbsp;</span>{EVENT_COPY[event].title}
+                </button>
+            {/each}
+        </div>
         <RatingPrompt />
         {#if isLoading}
             <div class="loader" aria-live="polite">Loading prediction…</div>
@@ -214,6 +244,8 @@
         font-weight: 600;
     }
     .toggle-btn:hover { opacity: 0.9; }
+    .event-toggle { margin-top: -0.75rem; }
+    .event-toggle .toggle-btn { font-size: 0.85rem; padding: 0.35rem 1rem; }
     .loader { opacity: 0.9; }
     .error { color: #ffd3d3; }
 </style>

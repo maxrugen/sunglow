@@ -18,18 +18,19 @@ Weather and geocoding APIs are public. Push alerts need `DATABASE_URL` (Neon), V
 
 ## Architecture
 
-Sunglow is a SvelteKit app (Svelte 5, runes) that predicts sunset quality for a location or during a flight. It's deployed to Vercel with `@sveltejs/adapter-vercel` on Node.js 24.x.
+Sunglow is a SvelteKit app (Svelte 5, runes) that predicts sunset and sunrise quality for a location, and sunset quality during a flight. It's deployed to Vercel with `@sveltejs/adapter-vercel` on Node.js 24.x.
 
 ### Location prediction
 
-1. `LocationInput.svelte` (city search via `/api/geocode`, or geolocation) → `+page.svelte` POSTs coordinates to `/api/predict`.
-2. `predictSunset()` in `src/lib/server/prediction.ts`:
-   - `upcomingSunset()` picks tonight's sunset, or tomorrow's once tonight's afterglow (30 min) has passed.
-   - Fetches the hourly forecast and air quality (AOD, PM2.5) via `src/lib/server/weather.ts`, plus cloud cover 50/150/300 km toward the setting sun via `src/lib/server/horizon.ts` (one multi-point request), all in parallel.
-   - Selects the hour nearest sunset, builds a weighted composite, scores it with `evaluate()`.
-   - Returns score, confidence, factor details, `day`, and sunset/golden-hour `timings` (the client doesn't run SunCalc).
-   - Cached in memory by (rounded lat/lon, sunset hour), checked before any upstream call.
-3. Deep links `/?lat=&lon=&label=` are rendered by `+page.server.ts`, which calls `predictSunset()` directly.
+1. `LocationInput.svelte` (city search via `/api/geocode`, or geolocation) → `+page.svelte` POSTs coordinates plus `event` (`'sunset' | 'sunrise'`, from the Sunset/Sunrise switch) to `/api/predict`.
+2. `predictEvent()` in `src/lib/server/prediction.ts` (`predictSunset()` is a thin wrapper):
+   - `nextEvent()` picks the next sunrise/sunset that isn't over yet (grace: 30 min after sunset, 15 min after sunrise). It checks SunCalc for yesterday/today/tomorrow because SunCalc's "nearest solar day" can return a passed event after local midnight or at high latitudes. `day` compares **local dates** (zone via `timeZoneAt()`), so 01:00 gives "this morning's sunrise".
+   - Fetches the hourly forecast and air quality (AOD, PM2.5) via `src/lib/server/weather.ts`, plus cloud cover 50/150/300 km toward the sun at the event via `src/lib/server/horizon.ts` (one multi-point request), all in parallel.
+   - Selects the hour nearest the event, builds a weighted composite, scores it with `evaluate()` (same model for both events).
+   - Returns `event`, score, confidence, factor details, `day`, and `timings.eventEpochSec` / `goldenHourEpochSec` (golden hour start for sunset, end for sunrise). `timings.sunsetEpochSec` is deprecated, kept for old clients.
+   - Cached in memory by (rounded lat/lon, event, event hour), checked before any upstream call.
+3. Deep links `/?lat=&lon=&label=&event=` are rendered by `+page.server.ts`, which calls `predictEvent()` directly.
+4. User-facing per-event wording lives in `src/lib/events.ts` (`EVENT_COPY`); don't hard-code "sunset" in components.
 
 ### Flight prediction
 
@@ -41,10 +42,15 @@ Sunglow is a SvelteKit app (Svelte 5, runes) that predicts sunset quality for a 
 - `/api/cron` runs hourly via a cron-job.org job (Vercel Hobby cron is only daily; GitHub Actions schedules ran hours late, so `cron.yml` is manual-only now). It notifies subscribers whose sunset is 2–3 h away and scores ≥ `SUNSET_SCORE_MIN`, deduped per day via `lastNotifiedDate`.
 - `/api/cron` requires `Authorization: Bearer $CRON_SECRET`; without a secret it's only open in dev.
 
-### Sunset ratings
+### Ratings
 
-- `/api/predict` and the deep-link load attach a `ratingToken` (`src/lib/server/ratings.ts`): an HMAC-signed snapshot of the prediction (inputs, score, confidence, `SCORING_VERSION`). Requires `RATING_SECRET` + `DATABASE_URL`, otherwise ratings are off.
-- `RatingPrompt.svelte` + `src/lib/rating-store.ts` (localStorage) ask for a 1–5 rating from 15 min before until 24 h after a viewed sunset; `POST /api/ratings` verifies the token and upserts into `sunset_ratings`.
+- `/api/predict` and the deep-link load attach a `ratingToken` (`src/lib/server/ratings.ts`): an HMAC-signed snapshot of the prediction (event, inputs, score, confidence, `SCORING_VERSION`). Requires `RATING_SECRET` + `DATABASE_URL`, otherwise ratings are off.
+- `RatingPrompt.svelte` + `src/lib/rating-store.ts` (localStorage) ask for a 1–5 rating from 15 min before until 24 h after a viewed sunrise/sunset; `POST /api/ratings` verifies the token and upserts into `sunset_ratings` (despite the name, it holds both events: see `event`; `sunset_at` is the event time).
+- Token and stored-item readers accept the pre-sunrise format (no `event`, `sunsetEpochSec`) for backwards compatibility.
+
+### Database migrations
+
+Generate with `npm run db:generate`; apply each new `drizzle/000N_*.sql` to Neon **before** deploying code that uses it (Drizzle selects all schema columns by name). Never run `drizzle-kit migrate`: there is no migrations table, so it would re-run `0000`.
 
 ### Key files
 

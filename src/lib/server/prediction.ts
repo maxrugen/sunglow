@@ -2,24 +2,32 @@ import SunCalc from 'suncalc';
 import { evaluate, type WeatherData } from '$lib/server/scoring';
 import { airQualityAt, compositeAt, fetchAirQuality, fetchForecast, hourCount, nearestIndex } from '$lib/server/weather';
 import { fetchHorizon } from '$lib/server/horizon';
+import { timeZoneAt } from '$lib/server/flight-time';
+import type { SkyEvent } from '$lib/types';
 
 export type PredictionPayload = {
+  event: SkyEvent;
   qualityScore: number;
   weatherData: WeatherData & {
     pressureMslHpa: number;
     temperature2mC: number;
     dewPointC: number;
-    /** Compass bearing toward the setting sun, when the horizon was sampled. */
+    /** Compass bearing toward the sun at the event, when the horizon was sampled. */
     horizonAzimuthDeg?: number;
     selectedHourIndex: number;
     selectedHour: number | undefined;
   };
   confidence: number;
   explanation: { factors: Record<string, unknown> };
-  /** Which sunset was scored: tonight's, or tomorrow's once tonight's is over. */
+  /** Whether the scored event falls on today's or tomorrow's local date. */
   day: 'today' | 'tomorrow';
-  /** UTC epoch seconds; null where the sun doesn't set (polar day/night). */
-  timings: { sunsetEpochSec: number | null; goldenHourEpochSec: number | null };
+  /** UTC epoch seconds; null where the event doesn't occur (polar day/night). */
+  timings: {
+    eventEpochSec: number | null;
+    /** @deprecated Kept for clients from before sunrise mode; equals eventEpochSec for sunsets, null otherwise. */
+    sunsetEpochSec: number | null;
+    goldenHourEpochSec: number | null;
+  };
   used: {
     /** UTC epoch seconds of the scored hour. */
     epochSec: number;
@@ -30,17 +38,17 @@ export type PredictionPayload = {
 };
 
 // Simple in-memory cache (ephemeral in serverless environments), keyed by
-// rounded coordinates + the sunset hour, so repeat lookups skip the upstream fetches.
+// rounded coordinates + event + event hour, so repeat lookups skip the upstream fetches.
 const responseCache = new Map<string, { ts: number; payload: PredictionPayload }>();
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const CACHE_MAX_ENTRIES = 500;
 
-function getCacheKey(lat: number, lon: number, sunsetEpochSec: number | null): string {
+function getCacheKey(lat: number, lon: number, event: SkyEvent, eventEpochSec: number | null): string {
   const bucket =
-    sunsetEpochSec != null
-      ? `h:${Math.floor(sunsetEpochSec / 3600)}`
+    eventEpochSec != null
+      ? `h:${Math.floor(eventEpochSec / 3600)}`
       : `d:${new Date().toISOString().slice(0, 10)}`;
-  return `${lat.toFixed(3)},${lon.toFixed(3)},${bucket}`;
+  return `${lat.toFixed(3)},${lon.toFixed(3)},${event},${bucket}`;
 }
 
 function cacheSet(key: string, payload: PredictionPayload) {
@@ -53,26 +61,54 @@ function cacheSet(key: string, payload: PredictionPayload) {
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-/** Color often peaks after the sun is down, so keep showing tonight for a while. */
-const AFTERGLOW_MS = 30 * 60 * 1000;
+/**
+ * How long an event stays "current" after it happens. Sunset color often peaks
+ * after the sun is down; sunrise color peaks before the sun is up.
+ */
+const GRACE_MS: Record<SkyEvent, number> = { sunset: 30 * 60 * 1000, sunrise: 15 * 60 * 1000 };
+/** SunCalc golden-hour field: evening golden hour starts, morning golden hour ends. */
+const GOLDEN_HOUR_FIELD: Record<SkyEvent, 'goldenHour' | 'goldenHourEnd'> = {
+  sunset: 'goldenHour',
+  sunrise: 'goldenHourEnd',
+};
+/** Fallback hour (local) when the sun doesn't rise or set. */
+const POLAR_FALLBACK_HOUR: Record<SkyEvent, number> = { sunset: 18, sunrise: 6 };
 
 function validDate(d: unknown): Date | null {
   return d instanceof Date && !isNaN(d.getTime()) ? d : null;
 }
 
+function localDateKey(d: Date, timeZone: string): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+}
+
+/**
+ * The next sunrise or sunset that is still worth predicting.
+ *
+ * SunCalc returns the event of the solar day nearest the given time, which
+ * after local midnight (or at high latitudes) can be one that has already
+ * passed. So check yesterday, today and tomorrow and take the earliest event
+ * that isn't over yet. `day` compares local calendar dates, so 01:00 gives
+ * "this morning's sunrise" rather than "tomorrow's".
+ */
+export function nextEvent(now: Date, latitude: number, longitude: number, event: SkyEvent) {
+  const cutoff = now.getTime() - GRACE_MS[event];
+  const next = [-1, 0, 1]
+    .map((k) => SunCalc.getTimes(new Date(now.getTime() + k * DAY_MS), latitude, longitude))
+    .map((t) => ({ time: validDate(t?.[event]), goldenHour: validDate(t?.[GOLDEN_HOUR_FIELD[event]]) }))
+    .filter((c): c is { time: Date; goldenHour: Date | null } => c.time !== null && c.time.getTime() > cutoff)
+    .sort((a, b) => a.time.getTime() - b.time.getTime())[0];
+
+  if (!next) return { event, day: 'today' as const, time: null, goldenHour: null };
+  const zone = timeZoneAt(latitude, longitude);
+  const day = localDateKey(next.time, zone) > localDateKey(now, zone) ? ('tomorrow' as const) : ('today' as const);
+  return { event, day, time: next.time, goldenHour: next.goldenHour };
+}
+
 /** Tonight's sunset, or tomorrow's once tonight's afterglow has passed. */
 export function upcomingSunset(now: Date, latitude: number, longitude: number) {
-  const today = SunCalc.getTimes(now, latitude, longitude);
-  const sunsetToday = validDate(today?.sunset);
-  if (sunsetToday && now.getTime() > sunsetToday.getTime() + AFTERGLOW_MS) {
-    const tomorrow = SunCalc.getTimes(new Date(now.getTime() + DAY_MS), latitude, longitude);
-    return {
-      day: 'tomorrow' as const,
-      sunset: validDate(tomorrow?.sunset),
-      goldenHour: validDate(tomorrow?.goldenHour),
-    };
-  }
-  return { day: 'today' as const, sunset: sunsetToday, goldenHour: validDate(today?.goldenHour) };
+  const { day, time, goldenHour } = nextEvent(now, latitude, longitude, 'sunset');
+  return { day, sunset: time, goldenHour };
 }
 
 /** Carries an HTTP status so the route can translate upstream failures. */
@@ -86,31 +122,33 @@ export class PredictionError extends Error {
 }
 
 /**
- * Fetch weather for a location, select the hour nearest sunset, and score it.
- * Shared by the /api/predict endpoint, the page's deep-link load and the
- * notification cron.
+ * Fetch weather for a location, select the hour nearest the next sunrise or
+ * sunset, and score it. Shared by the /api/predict endpoint, the page's
+ * deep-link load and the notification cron.
  */
-export async function predictSunset({
+export async function predictEvent({
   latitude,
   longitude,
+  event,
 }: {
   latitude: number;
   longitude: number;
+  event: SkyEvent;
 }): Promise<PredictionPayload> {
-  const upcoming = upcomingSunset(new Date(), latitude, longitude);
-  const sunsetSec = upcoming.sunset ? Math.floor(upcoming.sunset.getTime() / 1000) : null;
+  const upcoming = nextEvent(new Date(), latitude, longitude, event);
+  const eventSec = upcoming.time ? Math.floor(upcoming.time.getTime() / 1000) : null;
 
-  const cacheKey = getCacheKey(latitude, longitude, sunsetSec);
+  const cacheKey = getCacheKey(latitude, longitude, event, eventSec);
   const cached = responseCache.get(cacheKey);
   if (cached && Date.now() - cached.ts < CACHE_TTL_MS) {
     return cached.payload;
   }
 
   const [forecast, aq, horizon] = await Promise.all([
-    // Two days so tomorrow's sunset is covered once tonight's has passed.
-    fetchForecast(latitude, longitude, 2, { daily: 'sunset' }),
+    // Two days so the next event is covered even when today's has passed.
+    fetchForecast(latitude, longitude, 2, { daily: 'sunrise,sunset' }),
     fetchAirQuality(latitude, longitude),
-    upcoming.sunset ? fetchHorizon(latitude, longitude, upcoming.sunset) : Promise.resolve(null),
+    upcoming.time ? fetchHorizon(latitude, longitude, upcoming.time) : Promise.resolve(null),
   ]);
   if (!forecast) {
     throw new PredictionError('Failed to fetch weather data', 502);
@@ -120,17 +158,17 @@ export async function predictSunset({
   const length = hourCount(forecast);
   const utcOffsetSeconds = Number(forecast.utc_offset_seconds ?? 0);
 
-  // Fall back to Open-Meteo's own sunset (also a UTC epoch) if SunCalc had none.
-  let targetSec = sunsetSec;
-  const apiSunset = Number(forecast.daily?.sunset?.[upcoming.day === 'tomorrow' ? 1 : 0]);
-  if (targetSec == null && Number.isFinite(apiSunset)) targetSec = apiSunset;
+  // Fall back to Open-Meteo's own event time (also a UTC epoch) if SunCalc had none.
+  let targetSec = eventSec;
+  const apiEvent = Number(forecast.daily?.[event]?.[upcoming.day === 'tomorrow' ? 1 : 0]);
+  if (targetSec == null && Number.isFinite(apiEvent)) targetSec = apiEvent;
 
   let idx = 0;
   if (times.length > 0 && targetSec != null) {
     idx = Math.max(0, nearestIndex(times, targetSec));
   } else if (length > 0) {
-    // No sunset to anchor on (polar day/night): use 18:00 local as a heuristic.
-    idx = Math.min(18, length - 1);
+    // No event to anchor on (polar day/night): use a typical local hour instead.
+    idx = Math.min(POLAR_FALLBACK_HOUR[event], length - 1);
   }
 
   const c = compositeAt(forecast, idx);
@@ -169,21 +207,23 @@ export async function predictSunset({
     selectedHourIndex: idx,
     selectedHour: times[idx],
   };
-  const alignedToSunset =
+  const alignedToEvent =
     Number.isFinite(selectedEpochSec) && targetSec != null
-      ? Math.abs(selectedEpochSec - targetSec) <= 1800 // within 30 minutes of sunset
+      ? Math.abs(selectedEpochSec - targetSec) <= 1800 // within 30 minutes of the event
       : false;
 
-  const { score: qualityScore, details, confidence } = evaluate(weatherData, alignedToSunset);
+  const { score: qualityScore, details, confidence } = evaluate(weatherData, alignedToEvent);
 
   const payload: PredictionPayload = {
+    event,
     qualityScore,
     weatherData,
     confidence,
     explanation: { factors: details },
     day: upcoming.day,
     timings: {
-      sunsetEpochSec: sunsetSec,
+      eventEpochSec: eventSec,
+      sunsetEpochSec: event === 'sunset' ? eventSec : null,
       goldenHourEpochSec: upcoming.goldenHour ? Math.floor(upcoming.goldenHour.getTime() / 1000) : null,
     },
     used: { epochSec: selectedEpochSec, latitude, longitude, utcOffsetSeconds },
@@ -191,4 +231,9 @@ export async function predictSunset({
 
   cacheSet(cacheKey, payload);
   return payload;
+}
+
+/** Sunset prediction (the original entry point, used by sunset-only callers). */
+export function predictSunset(coords: { latitude: number; longitude: number }): Promise<PredictionPayload> {
+  return predictEvent({ ...coords, event: 'sunset' });
 }

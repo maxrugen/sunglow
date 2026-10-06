@@ -21,11 +21,12 @@ const { createRatingToken } = await import('$lib/server/ratings');
 
 const sunsetEpochSec = Math.floor(Date.now() / 1000) - 3600; // an hour ago
 const prediction = {
+  event: 'sunset' as 'sunset' | 'sunrise',
   qualityScore: 70,
   confidence: 80,
   weatherData: { highCloud: 50, midCloud: 30, lowCloud: 5, humidity: 50, aod: 0.2 },
   used: { latitude: 48.14, longitude: 11.58 },
-  timings: { sunsetEpochSec },
+  timings: { eventEpochSec: sunsetEpochSec },
 };
 
 function call(body: unknown) {
@@ -44,8 +45,14 @@ describe('POST /api/ratings', () => {
     const res = await call({ token: createRatingToken(prediction), rating: 4, deviceId: 'device-1234' });
     expect(res.status).toBe(200);
     expect(inserted).toEqual([
-      expect.objectContaining({ deviceId: 'device-1234', rating: 4, predictedScore: 70, latitude: 48.14 }),
+      expect.objectContaining({ event: 'sunset', deviceId: 'device-1234', rating: 4, predictedScore: 70, latitude: 48.14 }),
     ]);
+  });
+
+  it('stores sunrise ratings with their event', async () => {
+    const res = await call({ token: createRatingToken({ ...prediction, event: 'sunrise' }), rating: 5, deviceId: 'device-1234' });
+    expect(res.status).toBe(200);
+    expect(inserted).toEqual([expect.objectContaining({ event: 'sunrise', rating: 5 })]);
   });
 
   it('rejects bad input', async () => {
@@ -57,7 +64,7 @@ describe('POST /api/ratings', () => {
   });
 
   it('refuses sunsets outside the rating window', async () => {
-    const old = createRatingToken({ ...prediction, timings: { sunsetEpochSec: sunsetEpochSec - 3 * 86400 } });
+    const old = createRatingToken({ ...prediction, timings: { eventEpochSec: sunsetEpochSec - 3 * 86400 } });
     expect((await call({ token: old, rating: 3, deviceId: 'device-1234' })).status).toBe(410);
   });
 

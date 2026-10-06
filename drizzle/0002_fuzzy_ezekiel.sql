@@ -1,0 +1,1 @@
+ALTER TABLE "sunset_ratings" ADD COLUMN "event" text DEFAULT 'sunset' NOT NULL;

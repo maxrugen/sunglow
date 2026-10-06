@@ -6,8 +6,8 @@ const RAD_TO_DEG = 180 / Math.PI;
 const EARTH_RADIUS_KM = 6371;
 
 /**
- * Points sampled toward the setting sun. Light that colors high clouds overhead
- * after sunset grazes the surface roughly 100–300 km away in the sun's
+ * Points sampled toward the sun at sunrise or sunset. Light that colors high
+ * clouds overhead around the event grazes the surface roughly 100–300 km away in the sun's
  * direction, so the middle samples count most.
  */
 export const HORIZON_SAMPLES = [
@@ -22,7 +22,7 @@ const MID_CLOUD_FACTOR = 0.5;
 export type HorizonSample = { km: number; lat: number; lon: number; lowCloud: number; midCloud: number };
 
 export type Horizon = {
-  /** Compass bearing of the sun at sunset (0 = north, clockwise). */
+  /** Compass bearing of the sun at the event (0 = north, clockwise). */
   azimuthDeg: number;
   /** Weighted share (0–100) of the path toward the sun blocked by cloud. */
   blockingPct: number;
@@ -62,13 +62,13 @@ export function horizonBlocking(samples: Array<Pick<HorizonSample, 'km' | 'lowCl
 type CloudForecast = { hourly?: { time?: number[]; cloudcover_low?: number[]; cloudcover_mid?: number[] } };
 
 /**
- * Cloud cover along the sun's direction at `sunset`, from a single multi-point
+ * Cloud cover along the sun's direction at `eventTime` (sunrise or sunset), from a single multi-point
  * Open-Meteo request. Resolves to null on any failure, since the horizon is an
  * optional refinement to the score.
  */
-export async function fetchHorizon(lat: number, lon: number, sunset: Date): Promise<Horizon | null> {
+export async function fetchHorizon(lat: number, lon: number, eventTime: Date): Promise<Horizon | null> {
   try {
-    const azimuthDeg = sunAzimuth(sunset, lat, lon);
+    const azimuthDeg = sunAzimuth(eventTime, lat, lon);
     const points = HORIZON_SAMPLES.map((s) => ({ km: s.km, ...destinationPoint(lat, lon, azimuthDeg, s.km) }));
     const params = new URLSearchParams({
       latitude: points.map((p) => p.lat.toFixed(4)).join(','),
@@ -82,7 +82,7 @@ export async function fetchHorizon(lat: number, lon: number, sunset: Date): Prom
     const body = (await res.json()) as CloudForecast[];
     if (!Array.isArray(body) || body.length !== points.length) return null;
 
-    const targetSec = Math.floor(sunset.getTime() / 1000);
+    const targetSec = Math.floor(eventTime.getTime() / 1000);
     const samples: HorizonSample[] = [];
     for (let i = 0; i < points.length; i++) {
       const hourly = body[i]?.hourly;

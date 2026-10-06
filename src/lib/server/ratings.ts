@@ -1,16 +1,19 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { env } from '$env/dynamic/private';
 import { SCORING_VERSION, type WeatherData } from '$lib/server/scoring';
+import type { SkyEvent } from '$lib/types';
 
-/** Ratings are accepted from sunset until this long after it. */
+/** Ratings are accepted from the event until this long after it. */
 export const RATING_WINDOW_MS = 24 * 60 * 60 * 1000;
-/** Allow rating slightly before the official sunset (clock skew, early color). */
+/** Allow rating slightly before the official sunrise/sunset (clock skew, early color). */
 const EARLY_GRACE_MS = 15 * 60 * 1000;
 
 export type RatingSnapshot = {
+  event: SkyEvent;
   latitude: number;
   longitude: number;
-  sunsetEpochSec: number;
+  /** UTC epoch seconds of the sunrise or sunset. */
+  eventEpochSec: number;
   predictedScore: number;
   confidence: number;
   scoringVersion: number;
@@ -32,18 +35,20 @@ function sign(body: string, secret: string): string {
  * prediction, and clients can't submit made-up inputs.
  */
 export function createRatingToken(prediction: {
+  event: SkyEvent;
   qualityScore: number;
   confidence: number;
   weatherData: WeatherData;
   used: { latitude: number; longitude: number };
-  timings: { sunsetEpochSec: number | null };
+  timings: { eventEpochSec: number | null };
 }): string | undefined {
   const secret = env.RATING_SECRET;
-  if (!secret || !env.DATABASE_URL || prediction.timings.sunsetEpochSec == null) return undefined;
+  if (!secret || !env.DATABASE_URL || prediction.timings.eventEpochSec == null) return undefined;
   const snapshot: RatingSnapshot = {
+    event: prediction.event,
     latitude: Math.round(prediction.used.latitude * 100) / 100,
     longitude: Math.round(prediction.used.longitude * 100) / 100,
-    sunsetEpochSec: prediction.timings.sunsetEpochSec,
+    eventEpochSec: prediction.timings.eventEpochSec,
     predictedScore: prediction.qualityScore,
     confidence: prediction.confidence,
     scoringVersion: SCORING_VERSION,
@@ -63,14 +68,17 @@ export function verifyRatingToken(token: string): RatingSnapshot | null {
   const given = Buffer.from(signature);
   if (expected.length !== given.length || !timingSafeEqual(expected, given)) return null;
   try {
-    return JSON.parse(Buffer.from(body, 'base64url').toString()) as RatingSnapshot;
+    const raw = JSON.parse(Buffer.from(body, 'base64url').toString());
+    // Tokens issued before sunrise mode had no event and named the time sunsetEpochSec.
+    const { sunsetEpochSec, ...rest } = raw;
+    return { ...rest, event: raw.event ?? 'sunset', eventEpochSec: raw.eventEpochSec ?? sunsetEpochSec } as RatingSnapshot;
   } catch {
     return null;
   }
 }
 
-/** Whether `nowMs` falls in the window in which a sunset can be rated. */
-export function inRatingWindow(sunsetEpochSec: number, nowMs = Date.now()): boolean {
-  const sunsetMs = sunsetEpochSec * 1000;
-  return nowMs >= sunsetMs - EARLY_GRACE_MS && nowMs <= sunsetMs + RATING_WINDOW_MS;
+/** Whether `nowMs` falls in the window in which a sunrise or sunset can be rated. */
+export function inRatingWindow(eventEpochSec: number, nowMs = Date.now()): boolean {
+  const eventMs = eventEpochSec * 1000;
+  return nowMs >= eventMs - EARLY_GRACE_MS && nowMs <= eventMs + RATING_WINDOW_MS;
 }

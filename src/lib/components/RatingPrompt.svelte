@@ -55,10 +55,10 @@
             <p class="rating-title" aria-live="polite">Thanks! This helps tune future predictions.</p>
         {:else}
             <p class="rating-title" id="rating-title">
-                How was the sunset in {pending.label}?
+                How was the {pending.event} in {pending.label}?
                 <small>We predicted {pending.predictedScore}%.</small>
             </p>
-            <div class="choices" role="group" aria-label="Rate the sunset">
+            <div class="choices" role="group" aria-label={`Rate the ${pending.event}`}>
                 {#each CHOICES as choice}
                     <button
                         type="button"

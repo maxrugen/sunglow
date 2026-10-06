@@ -24,7 +24,7 @@ type HourlyVar = (typeof HOURLY_VARS)[number];
 export type Forecast = {
   utc_offset_seconds?: number;
   hourly?: Partial<Record<HourlyVar | 'time', number[]>>;
-  daily?: { sunset?: number[] };
+  daily?: { sunrise?: number[]; sunset?: number[] };
 };
 
 type AirQuality = {

@@ -2,24 +2,29 @@ import type { WeatherData } from './server/scoring';
 
 export type { WeatherData };
 
+export type SkyEvent = 'sunset' | 'sunrise';
+
 /** Fields of the server prediction payload that the UI needs. */
 export type PredictionSummary = {
+  event?: SkyEvent;
   qualityScore: number;
   confidence?: number;
   explanation?: { factors?: Record<string, unknown> };
   day?: 'today' | 'tomorrow';
-  timings?: { sunsetEpochSec: number | null; goldenHourEpochSec: number | null };
+  timings?: { eventEpochSec?: number | null; sunsetEpochSec?: number | null; goldenHourEpochSec: number | null };
   used?: { epochSec?: number; latitude?: number; longitude?: number; utcOffsetSeconds?: number };
   /** Signed snapshot for a later "How was it?" rating; absent when ratings are off. */
   ratingToken?: string;
 };
 
 export type ClientPrediction = {
+  event: SkyEvent;
   qualityScore: number;
   confidence?: number;
   explanation?: { factors?: Record<string, unknown> };
   day: 'today' | 'tomorrow';
-  timings: { sunset: Date | null; goldenHour: Date | null };
+  /** Time of the sunrise/sunset and the related golden-hour boundary. */
+  timings: { event: Date | null; goldenHour: Date | null };
   used?: { epochSec?: number; latitude?: number; longitude?: number; utcOffsetSeconds?: number };
   ratingToken?: string;
 };
@@ -27,11 +32,15 @@ export type ClientPrediction = {
 export function toClientPrediction(p: PredictionSummary): ClientPrediction {
   const toDate = (sec: number | null | undefined) => (sec != null ? new Date(sec * 1000) : null);
   return {
+    event: p.event ?? 'sunset',
     qualityScore: p.qualityScore ?? 0,
     confidence: p.confidence,
     explanation: p.explanation,
     day: p.day ?? 'today',
-    timings: { sunset: toDate(p.timings?.sunsetEpochSec), goldenHour: toDate(p.timings?.goldenHourEpochSec) },
+    timings: {
+      event: toDate(p.timings?.eventEpochSec ?? p.timings?.sunsetEpochSec),
+      goldenHour: toDate(p.timings?.goldenHourEpochSec),
+    },
     used: p.used,
     ratingToken: p.ratingToken,
   };

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import SunCalc from 'suncalc';
-import { predictSunset, upcomingSunset } from './prediction';
+import { nextEvent, predictEvent, predictSunset, upcomingSunset } from './prediction';
 
 // New York, 2026-06-10: local midnight is 04:00Z, sunset ≈ 00:30Z on the 11th.
 const NYC = { latitude: 40.71, longitude: -74.0 };
@@ -121,5 +121,77 @@ describe('upcomingSunset()', () => {
     const r = upcomingSunset(new Date('2026-06-21T12:00:00Z'), 78.2, 15.6); // Svalbard
     expect(r.sunset).toBeNull();
     expect(r.day).toBe('today');
+  });
+});
+
+describe('nextEvent()', () => {
+  const MADRID = { lat: 40.42, lon: -3.7 };
+  const at = (iso: string, lat: number, lon: number, event: 'sunset' | 'sunrise') =>
+    nextEvent(new Date(iso), lat, lon, event);
+  const sunTimes = (iso: string, lat: number, lon: number) => SunCalc.getTimes(new Date(iso), lat, lon);
+
+  it("treats this morning's sunrise as today after local midnight", () => {
+    // 01:00 CEST on 16 June: SunCalc alone returns the 15 June sunrise.
+    const r = at('2026-06-15T23:00:00Z', MADRID.lat, MADRID.lon, 'sunrise');
+    expect(r.time?.toISOString()).toBe(sunTimes('2026-06-16T12:00:00Z', MADRID.lat, MADRID.lon).sunrise.toISOString());
+    expect(r.day).toBe('today');
+  });
+
+  it("treats tonight's sunset as today after local midnight", () => {
+    const r = at('2026-06-15T23:00:00Z', MADRID.lat, MADRID.lon, 'sunset');
+    expect(r.time?.toISOString()).toBe(sunTimes('2026-06-16T12:00:00Z', MADRID.lat, MADRID.lon).sunset.toISOString());
+    expect(r.day).toBe('today');
+  });
+
+  it('keeps a sunrise for 15 minutes, then moves to tomorrow', () => {
+    const sunrise = sunTimes('2026-06-16T12:00:00Z', MADRID.lat, MADRID.lon).sunrise.getTime();
+    const during = nextEvent(new Date(sunrise + 10 * 60 * 1000), MADRID.lat, MADRID.lon, 'sunrise');
+    const after = nextEvent(new Date(sunrise + 20 * 60 * 1000), MADRID.lat, MADRID.lon, 'sunrise');
+    expect(during.time?.getTime()).toBe(sunrise);
+    expect(during.day).toBe('today');
+    expect(after.time!.getTime() - sunrise).toBeGreaterThan(23 * 3600 * 1000);
+    expect(after.day).toBe('tomorrow');
+  });
+
+  it('finds the next sunrise at high latitude in May', () => {
+    // Tromsø, 00:30 local on 11 May; SunCalc(now) returns the 10 May sunrise.
+    const r = at('2026-05-10T22:30:00Z', 69.65, 18.96, 'sunrise');
+    expect(r.time?.toISOString()).toBe(sunTimes('2026-05-11T10:00:00Z', 69.65, 18.96).sunrise.toISOString());
+    expect(r.day).toBe('today');
+  });
+
+  it('uses the morning golden hour end for sunrise', () => {
+    const r = at('2026-06-15T23:00:00Z', MADRID.lat, MADRID.lon, 'sunrise');
+    expect(r.goldenHour!.getTime()).toBeGreaterThan(r.time!.getTime());
+  });
+
+  it('has no sunrise during polar day', () => {
+    const r = at('2026-06-21T12:00:00Z', 78.2, 15.6, 'sunrise');
+    expect(r.time).toBeNull();
+  });
+});
+
+describe('predictEvent() for sunrise', () => {
+  it('scores the hour nearest the next sunrise and samples the eastern horizon', async () => {
+    // 15:00Z is 11:00 EDT, so the next sunrise is tomorrow morning.
+    const coords = { latitude: 40.76, longitude: -74.0 };
+    const payload = await predictEvent({ ...coords, event: 'sunrise' });
+    const sunrise = SunCalc.getTimes(new Date('2026-06-11T12:00:00Z'), coords.latitude, coords.longitude).sunrise;
+
+    expect(payload.event).toBe('sunrise');
+    expect(payload.day).toBe('tomorrow');
+    expect(payload.timings.eventEpochSec).toBe(Math.floor(sunrise.getTime() / 1000));
+    expect(payload.timings.sunsetEpochSec).toBeNull();
+    expect(Math.abs(payload.used.epochSec - sunrise.getTime() / 1000)).toBeLessThanOrEqual(1800);
+    expect(payload.weatherData.horizonAzimuthDeg).toBeGreaterThan(50);
+    expect(payload.weatherData.horizonAzimuthDeg).toBeLessThan(130);
+  });
+
+  it('caches sunrise and sunset separately', async () => {
+    const coords = { latitude: 40.77, longitude: -74.0 };
+    await predictEvent({ ...coords, event: 'sunset' });
+    const afterSunset = fetchMock.mock.calls.length;
+    await predictEvent({ ...coords, event: 'sunrise' });
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(afterSunset);
   });
 });
